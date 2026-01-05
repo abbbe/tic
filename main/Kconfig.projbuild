@@ -1,0 +1,85 @@
+menu "TIC Configuration"
+
+    config TIC_LOOPBACK_TEST_MODE
+        bool "Enable loopback test mode"
+        default n
+        help
+            When enabled, the TIC generates a test signal internally using MCPWM
+            and captures it on the same GPIO pin using loopback. This mode is
+            useful for testing without external hardware.
+
+            When disabled, the TIC captures external signals on the input GPIO pins.
+
+    config TIC_INPUT_GPIO_A
+        int "Channel A input GPIO"
+        default 4 if TIC_LOOPBACK_TEST_MODE
+        default 1
+        range 0 48
+        help
+            GPIO pin for Channel A capture input.
+            In loopback test mode, this pin is also used for the test signal output.
+
+    config TIC_INPUT_GPIO_B
+        int "Channel B input GPIO (future)"
+        default 2
+        range 0 48
+        help
+            GPIO pin for Channel B capture input (reserved for future use).
+
+    menu "Test Signal Generator"
+        depends on TIC_LOOPBACK_TEST_MODE
+
+        config TIC_TEST_FREQ_HZ
+            int "Test signal frequency (Hz)"
+            default 1000
+            range 1 1000000
+            help
+                Frequency of the test signal generated in loopback test mode.
+
+    endmenu
+
+    menu "External PWM Output"
+        depends on !TIC_LOOPBACK_TEST_MODE
+
+        config TIC_PWM_OUTPUT_ENABLE
+            bool "Enable PWM output on separate GPIO"
+            default n
+            help
+                When enabled, generates a PWM signal on a separate GPIO pin.
+                Useful for testing external devices or as a reference signal.
+
+        config TIC_PWM_OUTPUT_GPIO
+            int "PWM output GPIO"
+            depends on TIC_PWM_OUTPUT_ENABLE
+            default 4
+            range 0 48
+            help
+                GPIO pin for PWM output signal.
+
+        config TIC_PWM_OUTPUT_FREQ_HZ
+            int "PWM output frequency (Hz)"
+            depends on TIC_PWM_OUTPUT_ENABLE
+            default 1000
+            range 1 1000000
+            help
+                Frequency of the PWM output signal.
+
+    endmenu
+
+    config TIC_EDGES_PER_BUFFER
+        int "Edges per buffer"
+        default 1000
+        range 1 8192
+        help
+            Number of edge events to capture before swapping buffers.
+            Lower values give more frequent statistics updates at high frequencies.
+
+    config TIC_STATS_PERIOD_MS
+        int "Stats period (ms)"
+        default 1000
+        range 100 60000
+        help
+            Maximum time between statistics reports, even if edge count
+            threshold is not reached. Ensures periodic output with slow signals.
+
+endmenu

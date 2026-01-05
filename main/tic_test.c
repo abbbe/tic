@@ -12,11 +12,13 @@ static mcpwm_oper_handle_t s_oper = NULL;
 static mcpwm_cmpr_handle_t s_cmpr = NULL;
 static mcpwm_gen_handle_t s_gen = NULL;
 
-esp_err_t tic_test_init(int gpio_num, uint32_t freq_hz)
+// Internal init function with loopback option
+static esp_err_t tic_test_init_internal(int gpio_num, uint32_t freq_hz, bool loopback)
 {
     esp_err_t ret;
 
-    ESP_LOGI(TAG, "Initializing test signal generator on GPIO %d at %lu Hz", gpio_num, (unsigned long)freq_hz);
+    ESP_LOGI(TAG, "Initializing PWM generator on GPIO %d at %lu Hz (loopback=%d)",
+             gpio_num, (unsigned long)freq_hz, loopback);
 
     // Calculate timer parameters
     // Use 1 MHz resolution for good precision at typical test frequencies
@@ -71,10 +73,10 @@ esp_err_t tic_test_init(int gpio_num, uint32_t freq_hz)
         return ret;
     }
 
-    // Create generator with loopback enabled
+    // Create generator (with optional loopback)
     mcpwm_generator_config_t gen_config = {
         .gen_gpio_num = gpio_num,
-        .flags.io_loop_back = true,  // Enable internal loopback for self-test
+        .flags.io_loop_back = loopback,
     };
     ret = mcpwm_new_generator(s_oper, &gen_config, &s_gen);
     if (ret != ESP_OK) {
@@ -106,10 +108,20 @@ esp_err_t tic_test_init(int gpio_num, uint32_t freq_hz)
         return ret;
     }
 
-    ESP_LOGI(TAG, "Test signal generator initialized: period=%lu ticks, resolution=%lu Hz",
+    ESP_LOGI(TAG, "PWM generator initialized: period=%lu ticks, resolution=%lu Hz",
              (unsigned long)period_ticks, (unsigned long)resolution_hz);
 
     return ESP_OK;
+}
+
+esp_err_t tic_test_init(int gpio_num, uint32_t freq_hz)
+{
+    return tic_test_init_internal(gpio_num, freq_hz, true);  // With loopback
+}
+
+esp_err_t tic_test_init_no_loopback(int gpio_num, uint32_t freq_hz)
+{
+    return tic_test_init_internal(gpio_num, freq_hz, false);  // Without loopback
 }
 
 esp_err_t tic_test_start(void)

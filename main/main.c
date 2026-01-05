@@ -4,18 +4,13 @@
 #include "freertos/event_groups.h"
 #include "esp_log.h"
 #include "esp_timer.h"
+#include "sdkconfig.h"
 
 #include "tic_capture.h"
 #include "tic_stats.h"
 #include "tic_test.h"
 
 static const char *TAG = "tic_main";
-
-// Configuration
-#define TEST_GPIO           4       // GPIO for test signal and capture
-#define TEST_FREQ_HZ        1000    // Test signal frequency (1 kHz)
-#define EDGES_PER_BUFFER    1000    // Number of edges per statistics window (edge-triggered swap)
-#define STATS_PERIOD_MS     1000    // Periodic stats interval (time-triggered swap)
 
 // Periodic timer callback - forces buffer swap for stats even with low/no signal
 static void periodic_timer_callback(void *arg)
@@ -29,18 +24,44 @@ void app_main(void)
 
     ESP_LOGI(TAG, "=== Time Interval Counter (TIC) ===");
     ESP_LOGI(TAG, "Phase 1: Single channel period measurement");
-    ESP_LOGI(TAG, "Test GPIO: %d, Test frequency: %d Hz", TEST_GPIO, TEST_FREQ_HZ);
-    ESP_LOGI(TAG, "Edges per buffer: %d (or every %d ms)", EDGES_PER_BUFFER, STATS_PERIOD_MS);
 
-    // Initialize test signal generator (MCPWM PWM)
-    ret = tic_test_init(TEST_GPIO, TEST_FREQ_HZ);
+#if CONFIG_TIC_LOOPBACK_TEST_MODE
+    ESP_LOGI(TAG, "Mode: LOOPBACK TEST");
+    ESP_LOGI(TAG, "GPIO: %d (loopback), Test frequency: %d Hz",
+             CONFIG_TIC_INPUT_GPIO_A, CONFIG_TIC_TEST_FREQ_HZ);
+#else
+    ESP_LOGI(TAG, "Mode: EXTERNAL INPUT");
+    ESP_LOGI(TAG, "Input GPIO: %d", CONFIG_TIC_INPUT_GPIO_A);
+#if CONFIG_TIC_PWM_OUTPUT_ENABLE
+    ESP_LOGI(TAG, "PWM Output GPIO: %d, Frequency: %d Hz",
+             CONFIG_TIC_PWM_OUTPUT_GPIO, CONFIG_TIC_PWM_OUTPUT_FREQ_HZ);
+#endif
+#endif
+    ESP_LOGI(TAG, "Edges per buffer: %d (or every %d ms)",
+             CONFIG_TIC_EDGES_PER_BUFFER, CONFIG_TIC_STATS_PERIOD_MS);
+
+#if CONFIG_TIC_LOOPBACK_TEST_MODE
+    // Initialize test signal generator with loopback on same pin
+    ret = tic_test_init(CONFIG_TIC_INPUT_GPIO_A, CONFIG_TIC_TEST_FREQ_HZ);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to initialize test signal generator");
         return;
     }
+#elif CONFIG_TIC_PWM_OUTPUT_ENABLE
+    // Initialize PWM output on separate pin (no loopback)
+    ret = tic_test_init_no_loopback(CONFIG_TIC_PWM_OUTPUT_GPIO, CONFIG_TIC_PWM_OUTPUT_FREQ_HZ);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to initialize PWM output");
+        return;
+    }
+#endif
 
-    // Initialize capture module with loopback enabled
-    ret = tic_capture_init(TEST_GPIO, true, EDGES_PER_BUFFER);
+    // Initialize capture module
+    bool loopback = false;
+#if CONFIG_TIC_LOOPBACK_TEST_MODE
+    loopback = true;
+#endif
+    ret = tic_capture_init(CONFIG_TIC_INPUT_GPIO_A, loopback, CONFIG_TIC_EDGES_PER_BUFFER);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to initialize capture module");
         return;
@@ -65,12 +86,14 @@ void app_main(void)
         return;
     }
 
-    // Start test signal generator
+#if CONFIG_TIC_LOOPBACK_TEST_MODE || CONFIG_TIC_PWM_OUTPUT_ENABLE
+    // Start test signal / PWM output generator
     ret = tic_test_start();
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to start test signal generator");
+        ESP_LOGE(TAG, "Failed to start signal generator");
         return;
     }
+#endif
 
     // Start capture
     ret = tic_capture_start();
@@ -80,16 +103,18 @@ void app_main(void)
     }
 
     // Start periodic timer
-    ret = esp_timer_start_periodic(periodic_timer, STATS_PERIOD_MS * 1000);  // microseconds
+    ret = esp_timer_start_periodic(periodic_timer, CONFIG_TIC_STATS_PERIOD_MS * 1000);  // microseconds
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to start periodic timer");
         return;
     }
 
     ESP_LOGI(TAG, "TIC running. Stats after %d edges OR every %d ms (whichever first).",
-             EDGES_PER_BUFFER, STATS_PERIOD_MS);
+             CONFIG_TIC_EDGES_PER_BUFFER, CONFIG_TIC_STATS_PERIOD_MS);
+#if CONFIG_TIC_LOOPBACK_TEST_MODE
     ESP_LOGI(TAG, "Expected period: %.3f us (%.1f Hz)",
-             1000000.0 / TEST_FREQ_HZ, (double)TEST_FREQ_HZ);
+             1000000.0 / CONFIG_TIC_TEST_FREQ_HZ, (double)CONFIG_TIC_TEST_FREQ_HZ);
+#endif
     ESP_LOGI(TAG, "");
 
     // Get capture resolution
