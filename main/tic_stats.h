@@ -15,10 +15,22 @@ typedef struct {
     double stddev_ns;         // Standard deviation in nanoseconds
 } tic_channel_stat_t;
 
-// Combined statistics for both channels
+// Statistics for relative delay between channels (B - A)
+typedef struct {
+    uint32_t count;           // Number of delay measurements
+    uint32_t missed_a;        // Channel A pulses without matching B
+    uint32_t missed_b;        // Channel B pulses without matching A
+    double min_ns;            // Minimum delay (can be negative)
+    double max_ns;            // Maximum delay
+    double mean_ns;           // Mean delay
+    double stddev_ns;         // Standard deviation of delay
+} tic_delay_stat_t;
+
+// Combined statistics for both channels and delay
 typedef struct {
     tic_channel_stat_t ch_a;  // Channel A statistics
     tic_channel_stat_t ch_b;  // Channel B statistics
+    tic_delay_stat_t delay;   // Relative delay B-A statistics
 } tic_stats_t;
 
 /**
@@ -39,6 +51,13 @@ void tic_stats_process(const tic_event_t *events, size_t event_count,
  * @param channel_name Name of the channel (e.g., "A" or "B")
  */
 void tic_stats_print_channel(const tic_channel_stat_t *stats, const char *channel_name);
+
+/**
+ * @brief Print delay statistics to console
+ *
+ * @param stats Delay statistics to print
+ */
+void tic_stats_print_delay(const tic_delay_stat_t *stats);
 
 /**
  * @brief Print statistics for both channels to console
