@@ -1,0 +1,16 @@
+# Build output
+build/
+
+# Generated config (keep sdkconfig.defaults, ignore generated sdkconfig)
+sdkconfig
+sdkconfig.old
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store

@@ -1,0 +1,12 @@
+idf_component_register(
+    SRCS
+        "main.c"
+        "tic_capture.c"
+        "tic_stats.c"
+        "tic_test.c"
+    INCLUDE_DIRS
+        "."
+    REQUIRES
+        driver
+        esp_timer
+)
