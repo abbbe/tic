@@ -290,13 +290,15 @@ void tic_stats_print_channel(const tic_channel_stat_t *stats, const char *channe
         return;
     }
 
+    double min_us = stats->min_ns / 1000.0;
+    double max_us = stats->max_ns / 1000.0;
     double mean_us = stats->mean_ns / 1000.0;
     double stddev_us = stats->stddev_ns / 1000.0;
     double freq_hz = (stats->mean_ns > 0) ? 1e9 / stats->mean_ns : 0.0;
 
-    ESP_LOGI(TAG, "Ch %s: %lu edges, period=%.3f us (%.3f Hz), std=%.3f us",
-             channel_name, (unsigned long)stats->edge_count,
-             mean_us, freq_hz, stddev_us);
+    ESP_LOGI(TAG, "Ch %s: %lu edges, %.3f Hz, period [%.3f..%.3f..%.3f] us, std=%.3f us",
+             channel_name, (unsigned long)stats->edge_count, freq_hz,
+             min_us, mean_us, max_us, stddev_us);
 }
 
 void tic_stats_print_delay(const tic_delay_stat_t *stats)
