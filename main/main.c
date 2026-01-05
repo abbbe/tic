@@ -23,17 +23,19 @@ void app_main(void)
     esp_err_t ret;
 
     ESP_LOGI(TAG, "=== Time Interval Counter (TIC) ===");
-    ESP_LOGI(TAG, "Phase 1: Single channel period measurement");
+    ESP_LOGI(TAG, "Dual channel period measurement");
 
 #if CONFIG_TIC_LOOPBACK_TEST_MODE
     ESP_LOGI(TAG, "Mode: LOOPBACK TEST");
-    ESP_LOGI(TAG, "GPIO: %d (loopback), Test frequency: %d Hz",
+    ESP_LOGI(TAG, "Channel A: GPIO %d (loopback), Test frequency: %d Hz",
              CONFIG_TIC_INPUT_GPIO_A, CONFIG_TIC_TEST_FREQ_HZ);
+    ESP_LOGI(TAG, "Channel B: GPIO %d (disabled in loopback mode)", CONFIG_TIC_INPUT_GPIO_B);
 #else
     ESP_LOGI(TAG, "Mode: EXTERNAL INPUT");
-    ESP_LOGI(TAG, "Input GPIO: %d", CONFIG_TIC_INPUT_GPIO_A);
+    ESP_LOGI(TAG, "Channel A: GPIO %d", CONFIG_TIC_INPUT_GPIO_A);
+    ESP_LOGI(TAG, "Channel B: GPIO %d", CONFIG_TIC_INPUT_GPIO_B);
 #if CONFIG_TIC_PWM_OUTPUT_ENABLE
-    ESP_LOGI(TAG, "PWM Output GPIO: %d, Frequency: %d Hz",
+    ESP_LOGI(TAG, "PWM Output: GPIO %d, Frequency: %d Hz",
              CONFIG_TIC_PWM_OUTPUT_GPIO, CONFIG_TIC_PWM_OUTPUT_FREQ_HZ);
 #endif
 #endif
@@ -41,7 +43,7 @@ void app_main(void)
              CONFIG_TIC_EDGES_PER_BUFFER, CONFIG_TIC_STATS_PERIOD_MS);
 
 #if CONFIG_TIC_LOOPBACK_TEST_MODE
-    // Initialize test signal generator with loopback on same pin
+    // Initialize test signal generator with loopback on Channel A
     ret = tic_test_init(CONFIG_TIC_INPUT_GPIO_A, CONFIG_TIC_TEST_FREQ_HZ);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to initialize test signal generator");
@@ -56,12 +58,20 @@ void app_main(void)
     }
 #endif
 
-    // Initialize capture module
+    // Initialize capture module with both channels
+    // In loopback mode, only Channel A is active (Channel B disabled with -1)
+    // In external mode, both channels are active
+    int gpio_b = -1;  // Disabled by default
+#if !CONFIG_TIC_LOOPBACK_TEST_MODE
+    gpio_b = CONFIG_TIC_INPUT_GPIO_B;
+#endif
+
     bool loopback = false;
 #if CONFIG_TIC_LOOPBACK_TEST_MODE
     loopback = true;
 #endif
-    ret = tic_capture_init(CONFIG_TIC_INPUT_GPIO_A, loopback, CONFIG_TIC_EDGES_PER_BUFFER);
+
+    ret = tic_capture_init(CONFIG_TIC_INPUT_GPIO_A, gpio_b, loopback, CONFIG_TIC_EDGES_PER_BUFFER);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to initialize capture module");
         return;
@@ -139,12 +149,12 @@ void app_main(void)
             size_t event_count;
             tic_event_t *events = tic_capture_get_ready_buffer(&event_count);
 
-            // Process events and calculate statistics
-            tic_stat_t stats;
+            // Process events and calculate statistics for both channels
+            tic_stats_t stats;
             tic_stats_process(events, event_count, resolution, &stats);
 
             // Print statistics
-            ESP_LOGI(TAG, "Buffer #%lu: %zu edges captured", (unsigned long)buffer_count, event_count);
+            ESP_LOGI(TAG, "--- Buffer #%lu: %zu events ---", (unsigned long)buffer_count, event_count);
             tic_stats_print(&stats);
             ESP_LOGI(TAG, "");  // Empty line for readability
         }

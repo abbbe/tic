@@ -10,7 +10,7 @@ static const char *TAG = "tic_capture";
 #define MAX_BUFFER_SIZE 8192  // Maximum events per buffer
 static size_t s_edges_per_buffer = 1000;  // Default, configurable
 
-// Double buffer
+// Double buffer (shared by both channels, events interleaved)
 static tic_event_t s_buffer_a[MAX_BUFFER_SIZE];
 static tic_event_t s_buffer_b[MAX_BUFFER_SIZE];
 static tic_event_t *s_active_buffer = s_buffer_a;
@@ -20,7 +20,8 @@ static size_t s_ready_count = 0;
 
 // MCPWM handles
 static mcpwm_cap_timer_handle_t s_cap_timer = NULL;
-static mcpwm_cap_channel_handle_t s_cap_channel = NULL;
+static mcpwm_cap_channel_handle_t s_cap_channel_a = NULL;
+static mcpwm_cap_channel_handle_t s_cap_channel_b = NULL;
 
 // Timer resolution
 static uint32_t s_resolution_hz = 0;
@@ -32,11 +33,13 @@ static EventGroupHandle_t s_event_group = NULL;
 static portMUX_TYPE spinlock = portMUX_INITIALIZER_UNLOCKED;
 
 // Capture callback - runs in ISR context
+// user_ctx contains the channel number (0 for A, 1 for B)
 static bool IRAM_ATTR capture_callback(mcpwm_cap_channel_handle_t cap_chan,
                                         const mcpwm_capture_event_data_t *edata,
                                         void *user_ctx)
 {
     BaseType_t high_task_woken = pdFALSE;
+    uint8_t channel = (uint8_t)(uintptr_t)user_ctx;
 
     // Only process rising edges
     if (edata->cap_edge != MCPWM_CAP_EDGE_POS) {
@@ -51,8 +54,8 @@ static bool IRAM_ATTR capture_callback(mcpwm_cap_channel_handle_t cap_chan,
     if (count < MAX_BUFFER_SIZE) {
         tic_event_t *event = &s_active_buffer[count];
         event->type = TIC_EVENT_EDGE;
+        event->channel = channel;
         event->reserved = 0;
-        event->reserved2 = 0;
         event->value = edata->cap_value;
         s_active_count = count + 1;
     }
@@ -88,12 +91,12 @@ static bool IRAM_ATTR capture_callback(mcpwm_cap_channel_handle_t cap_chan,
     return high_task_woken == pdTRUE;
 }
 
-esp_err_t tic_capture_init(int gpio_num, bool loopback, size_t edges_per_buffer)
+esp_err_t tic_capture_init(int gpio_a, int gpio_b, bool loopback, size_t edges_per_buffer)
 {
     esp_err_t ret;
 
-    ESP_LOGI(TAG, "Initializing capture on GPIO %d (loopback=%d, edges_per_buffer=%zu)",
-             gpio_num, loopback, edges_per_buffer);
+    ESP_LOGI(TAG, "Initializing capture: GPIO_A=%d, GPIO_B=%d, loopback=%d, edges_per_buffer=%zu",
+             gpio_a, gpio_b, loopback, edges_per_buffer);
 
     // Validate and set edges per buffer
     if (edges_per_buffer == 0 || edges_per_buffer > MAX_BUFFER_SIZE) {
@@ -129,37 +132,74 @@ esp_err_t tic_capture_init(int gpio_num, bool loopback, size_t edges_per_buffer)
     ESP_LOGI(TAG, "Capture timer resolution: %lu Hz (%.2f ns/tick)",
              (unsigned long)s_resolution_hz, 1e9 / s_resolution_hz);
 
-    // Create capture channel
-    mcpwm_capture_channel_config_t cap_ch_config = {
-        .gpio_num = gpio_num,
+    // Create Channel A
+    mcpwm_capture_channel_config_t cap_ch_config_a = {
+        .gpio_num = gpio_a,
         .prescale = 1,
-        .flags.pos_edge = true,      // Capture on rising edge
+        .flags.pos_edge = true,
         .flags.neg_edge = false,
         .flags.pull_up = false,
         .flags.pull_down = false,
         .flags.io_loop_back = loopback,
     };
-    ret = mcpwm_new_capture_channel(s_cap_timer, &cap_ch_config, &s_cap_channel);
+    ret = mcpwm_new_capture_channel(s_cap_timer, &cap_ch_config_a, &s_cap_channel_a);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to create capture channel: %s", esp_err_to_name(ret));
+        ESP_LOGE(TAG, "Failed to create capture channel A: %s", esp_err_to_name(ret));
         return ret;
     }
 
-    // Register capture callback
-    mcpwm_capture_event_callbacks_t cbs = {
+    // Register Channel A callback with channel ID in user_ctx
+    mcpwm_capture_event_callbacks_t cbs_a = {
         .on_cap = capture_callback,
     };
-    ret = mcpwm_capture_channel_register_event_callbacks(s_cap_channel, &cbs, NULL);
+    ret = mcpwm_capture_channel_register_event_callbacks(s_cap_channel_a, &cbs_a, (void*)(uintptr_t)TIC_CHANNEL_A);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to register callbacks: %s", esp_err_to_name(ret));
+        ESP_LOGE(TAG, "Failed to register channel A callbacks: %s", esp_err_to_name(ret));
         return ret;
     }
 
-    // Enable capture channel
-    ret = mcpwm_capture_channel_enable(s_cap_channel);
+    // Enable Channel A
+    ret = mcpwm_capture_channel_enable(s_cap_channel_a);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to enable capture channel: %s", esp_err_to_name(ret));
+        ESP_LOGE(TAG, "Failed to enable capture channel A: %s", esp_err_to_name(ret));
         return ret;
+    }
+    ESP_LOGI(TAG, "Channel A initialized on GPIO %d", gpio_a);
+
+    // Create Channel B if gpio_b is valid
+    if (gpio_b >= 0) {
+        mcpwm_capture_channel_config_t cap_ch_config_b = {
+            .gpio_num = gpio_b,
+            .prescale = 1,
+            .flags.pos_edge = true,
+            .flags.neg_edge = false,
+            .flags.pull_up = false,
+            .flags.pull_down = false,
+            .flags.io_loop_back = false,  // No loopback for channel B
+        };
+        ret = mcpwm_new_capture_channel(s_cap_timer, &cap_ch_config_b, &s_cap_channel_b);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to create capture channel B: %s", esp_err_to_name(ret));
+            return ret;
+        }
+
+        // Register Channel B callback with channel ID in user_ctx
+        mcpwm_capture_event_callbacks_t cbs_b = {
+            .on_cap = capture_callback,
+        };
+        ret = mcpwm_capture_channel_register_event_callbacks(s_cap_channel_b, &cbs_b, (void*)(uintptr_t)TIC_CHANNEL_B);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to register channel B callbacks: %s", esp_err_to_name(ret));
+            return ret;
+        }
+
+        // Enable Channel B
+        ret = mcpwm_capture_channel_enable(s_cap_channel_b);
+        if (ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to enable capture channel B: %s", esp_err_to_name(ret));
+            return ret;
+        }
+        ESP_LOGI(TAG, "Channel B initialized on GPIO %d", gpio_b);
     }
 
     // Enable capture timer

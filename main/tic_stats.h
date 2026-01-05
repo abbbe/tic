@@ -4,29 +4,45 @@
 #include <stdint.h>
 #include <stddef.h>
 
+// Statistics for a single channel
 typedef struct {
     uint32_t count;           // Number of periods measured
+    uint32_t edge_count;      // Number of edges captured
     uint32_t overflow_count;  // Number of timer overflows
     double min_ns;            // Minimum period in nanoseconds
     double max_ns;            // Maximum period in nanoseconds
     double mean_ns;           // Mean period in nanoseconds
     double stddev_ns;         // Standard deviation in nanoseconds
-} tic_stat_t;
+} tic_channel_stat_t;
+
+// Combined statistics for both channels
+typedef struct {
+    tic_channel_stat_t ch_a;  // Channel A statistics
+    tic_channel_stat_t ch_b;  // Channel B statistics
+} tic_stats_t;
 
 /**
- * @brief Process a buffer of events and calculate period statistics
+ * @brief Process a buffer of events and calculate period statistics for both channels
  *
- * @param events Array of capture events
+ * @param events Array of capture events (may contain interleaved A and B events)
  * @param event_count Number of events in the array
  * @param resolution_hz Capture timer resolution in Hz
- * @param stats Output: calculated statistics
+ * @param stats Output: calculated statistics for both channels
  */
 void tic_stats_process(const tic_event_t *events, size_t event_count,
-                       uint32_t resolution_hz, tic_stat_t *stats);
+                       uint32_t resolution_hz, tic_stats_t *stats);
 
 /**
- * @brief Print statistics to console
+ * @brief Print statistics for a single channel to console
+ *
+ * @param stats Statistics to print
+ * @param channel_name Name of the channel (e.g., "A" or "B")
+ */
+void tic_stats_print_channel(const tic_channel_stat_t *stats, const char *channel_name);
+
+/**
+ * @brief Print statistics for both channels to console
  *
  * @param stats Statistics to print
  */
-void tic_stats_print(const tic_stat_t *stats);
+void tic_stats_print(const tic_stats_t *stats);
