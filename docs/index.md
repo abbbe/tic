@@ -15,7 +15,8 @@ Dual-channel time interval counter for ESP32-S3 using MCPWM capture hardware.
 - Per-channel period statistics (min/max/mean/stddev)
 - Inter-channel delay measurement (B - A)
 - ISR-driven double buffering (up to 8192 edges)
-- Self-test loopback mode
+- Dual signal generator with relative delay (ns)
+- Auto loopback when gen GPIO == capture GPIO
 
 ## Quick Start
 
@@ -28,10 +29,12 @@ idf.py build flash monitor
 
 ## Hardware
 
-| Pin | Default GPIO | Function |
-|-----|--------------|----------|
-| Ch A | GPIO4 | Input capture |
-| Ch B | GPIO5 | Input capture |
+| Function | Default GPIO |
+|----------|--------------|
+| Capture A | GPIO4 |
+| Capture B | GPIO5 |
+| SigGen A | GPIO6 |
+| SigGen B | GPIO7 |
 
 3.3V logic, rising edge triggered.
 

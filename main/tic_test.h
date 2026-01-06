@@ -2,37 +2,40 @@
 
 #include "esp_err.h"
 #include <stdint.h>
+#include <stdbool.h>
 
 /**
- * @brief Initialize the test signal generator with loopback (MCPWM PWM)
+ * @brief Initialize signal generator A
  *
- * Uses io_loop_back for internal signal routing (same pin for output and capture).
- *
- * @param gpio_num GPIO pin for PWM output (with loopback)
- * @param freq_hz Desired frequency in Hz
+ * @param gpio GPIO pin for output
+ * @param freq_hz Frequency in Hz
+ * @param loopback Enable internal loopback
  * @return ESP_OK on success
  */
-esp_err_t tic_test_init(int gpio_num, uint32_t freq_hz);
+esp_err_t tic_siggen_init_a(int gpio, uint32_t freq_hz, bool loopback);
 
 /**
- * @brief Initialize PWM output without loopback (MCPWM PWM)
+ * @brief Initialize signal generator B with relative delay to A
  *
- * Normal GPIO output, no internal loopback. Use for external PWM generation.
+ * Generator B is synchronized to A via software sync. The delay is applied
+ * as a phase offset when sync triggers.
  *
- * @param gpio_num GPIO pin for PWM output
- * @param freq_hz Desired frequency in Hz
+ * @param gpio GPIO pin for output
+ * @param freq_hz Frequency in Hz
+ * @param delay_ns Delay relative to A in nanoseconds (positive = B lags A)
+ * @param loopback Enable internal loopback
  * @return ESP_OK on success
  */
-esp_err_t tic_test_init_no_loopback(int gpio_num, uint32_t freq_hz);
+esp_err_t tic_siggen_init_b(int gpio, uint32_t freq_hz, int32_t delay_ns, bool loopback);
 
 /**
- * @brief Start the test signal generator
+ * @brief Start signal generators (synchronized)
  * @return ESP_OK on success
  */
-esp_err_t tic_test_start(void);
+esp_err_t tic_siggen_start(void);
 
 /**
- * @brief Stop the test signal generator
+ * @brief Stop signal generators
  * @return ESP_OK on success
  */
-esp_err_t tic_test_stop(void);
+esp_err_t tic_siggen_stop(void);

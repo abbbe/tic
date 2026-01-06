@@ -27,11 +27,12 @@ Inter-channel delay (B - A):
 - Missed pulse tracking
 - Signed delay support (B can lead or lag A)
 
-## Test Infrastructure
+## Signal Generator
 
-- Loopback mode: internal PWM routed to capture input
-- External PWM output mode: reference signal generation
-- Configurable test frequencies (1 Hz to 1 MHz)
+- Dual PWM outputs with independent frequencies
+- Configurable relative delay (ns) for generator B
+- Auto loopback: internal routing when gen GPIO == capture GPIO
+- Frequency range: 1 Hz to 1 MHz
 
 ## Configuration
 
@@ -39,17 +40,17 @@ All options via `idf.py menuconfig`:
 
 ```
 TIC Configuration
-├── Loopback test mode [off]
-│   └── Test frequency [1000 Hz]
-├── Channel A GPIO [4]
-├── Channel B GPIO [5]
+├── Channel A input GPIO [4]
+├── Channel B input GPIO [5]
+└── Signal Generator
+    ├── Generator A freq (0=disable) [1000 Hz]
+    ├── Generator A GPIO [6]
+    ├── Generator B freq (0=disable) [1000 Hz]
+    ├── Generator B GPIO [7]
+    └── Generator B relative delay [0 ns]
 ├── Max buffer size [8192]
 ├── Edges per buffer [8192]
-├── Stats period [1000 ms]
-└── External PWM Output
-    ├── Enable [off]
-    ├── GPIO [4]
-    └── Frequency [1000 Hz]
+└── Stats period [1000 ms]
 ```
 
 ## Architecture
@@ -82,12 +83,21 @@ TIC Configuration
 ### tic_capture.h
 
 ```c
-esp_err_t tic_capture_init(int gpio_a, int gpio_b, bool loopback, size_t edges_per_buffer);
+esp_err_t tic_capture_init(int gpio_a, int gpio_b, bool loopback_a, bool loopback_b, size_t edges_per_buffer);
 esp_err_t tic_capture_start(void);
 esp_err_t tic_capture_stop(void);
 tic_event_t* tic_capture_get_ready_buffer(size_t *count);
 uint32_t tic_capture_get_resolution(void);
 void tic_capture_force_swap(void);
+```
+
+### tic_test.h
+
+```c
+esp_err_t tic_siggen_init_a(int gpio, uint32_t freq_hz, bool loopback);
+esp_err_t tic_siggen_init_b(int gpio, uint32_t freq_hz, int32_t delay_ns, bool loopback);
+esp_err_t tic_siggen_start(void);
+esp_err_t tic_siggen_stop(void);
 ```
 
 ### tic_stats.h

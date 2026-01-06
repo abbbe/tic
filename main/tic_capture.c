@@ -91,12 +91,12 @@ static bool IRAM_ATTR capture_callback(mcpwm_cap_channel_handle_t cap_chan,
     return high_task_woken == pdTRUE;
 }
 
-esp_err_t tic_capture_init(int gpio_a, int gpio_b, bool loopback, size_t edges_per_buffer)
+esp_err_t tic_capture_init(int gpio_a, int gpio_b, bool loopback_a, bool loopback_b, size_t edges_per_buffer)
 {
     esp_err_t ret;
 
-    ESP_LOGI(TAG, "Initializing capture: GPIO_A=%d, GPIO_B=%d, loopback=%d, edges_per_buffer=%zu",
-             gpio_a, gpio_b, loopback, edges_per_buffer);
+    ESP_LOGI(TAG, "Initializing capture: GPIO_A=%d (lb=%d), GPIO_B=%d (lb=%d), edges=%zu",
+             gpio_a, loopback_a, gpio_b, loopback_b, edges_per_buffer);
 
     // Validate and set edges per buffer
     if (edges_per_buffer == 0 || edges_per_buffer > CONFIG_TIC_MAX_BUFFER_SIZE) {
@@ -140,7 +140,7 @@ esp_err_t tic_capture_init(int gpio_a, int gpio_b, bool loopback, size_t edges_p
         .flags.neg_edge = false,
         .flags.pull_up = false,
         .flags.pull_down = false,
-        .flags.io_loop_back = loopback,
+        .flags.io_loop_back = loopback_a,
     };
     ret = mcpwm_new_capture_channel(s_cap_timer, &cap_ch_config_a, &s_cap_channel_a);
     if (ret != ESP_OK) {
@@ -175,7 +175,7 @@ esp_err_t tic_capture_init(int gpio_a, int gpio_b, bool loopback, size_t edges_p
             .flags.neg_edge = false,
             .flags.pull_up = false,
             .flags.pull_down = false,
-            .flags.io_loop_back = false,  // No loopback for channel B
+            .flags.io_loop_back = loopback_b,
         };
         ret = mcpwm_new_capture_channel(s_cap_timer, &cap_ch_config_b, &s_cap_channel_b);
         if (ret != ESP_OK) {

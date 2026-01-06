@@ -8,7 +8,8 @@ Dual-channel time interval counter using MCPWM capture. Measures signal period a
 - **Period statistics** - min/max/mean/stddev for each channel
 - **Relative delay** - B-A timing offset with matched-pair algorithm
 - **High throughput** - Up to 8192 edges per buffer, ISR-driven double buffering
-- **Self-test mode** - Internal loopback with configurable test frequency
+- **Dual signal generator** - Independent frequencies, configurable relative delay (ns)
+- **Auto loopback** - Internal loopback enabled when generator GPIO matches capture GPIO
 
 ## Hardware
 
@@ -16,8 +17,8 @@ Dual-channel time interval counter using MCPWM capture. Measures signal period a
 - Input signals: 3.3V logic level, rising edge triggered
 
 Default GPIOs (configurable via menuconfig):
-- Channel A: GPIO4
-- Channel B: GPIO5
+- Capture: A=GPIO4, B=GPIO5
+- Signal generator: A=GPIO6, B=GPIO7
 
 ## Build
 
@@ -33,15 +34,16 @@ idf.py build flash monitor
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `TIC_LOOPBACK_TEST_MODE` | off | Internal test signal on Channel A |
-| `TIC_TEST_FREQ_HZ` | 1000 | Test signal frequency (loopback mode) |
-| `TIC_INPUT_GPIO_A` | 4 | Channel A input pin |
-| `TIC_INPUT_GPIO_B` | 5 | Channel B input pin |
-| `TIC_MAX_BUFFER_SIZE` | 8192 | Max events per buffer (RAM: 2 × N × 8 bytes) |
+| `TIC_INPUT_GPIO_A` | 4 | Channel A capture input |
+| `TIC_INPUT_GPIO_B` | 5 | Channel B capture input |
+| `TIC_SIGGEN_A_FREQ_HZ` | 1000 | Generator A frequency (0=disable) |
+| `TIC_SIGGEN_A_GPIO` | 6 | Generator A output |
+| `TIC_SIGGEN_B_FREQ_HZ` | 1000 | Generator B frequency (0=disable) |
+| `TIC_SIGGEN_B_GPIO` | 7 | Generator B output |
+| `TIC_SIGGEN_B_DELAY_NS` | 0 | Generator B relative delay (ns) |
+| `TIC_MAX_BUFFER_SIZE` | 8192 | Max events per buffer |
 | `TIC_EDGES_PER_BUFFER` | 8192 | Buffer swap threshold |
 | `TIC_STATS_PERIOD_MS` | 1000 | Max time between stats (ms) |
-| `TIC_PWM_OUTPUT_ENABLE` | off | Generate PWM on separate pin |
-| `TIC_PWM_OUTPUT_FREQ_HZ` | 1000 | PWM output frequency (external mode) |
 
 ## Output
 
