@@ -4,6 +4,7 @@ build/
 # Generated config (keep sdkconfig.defaults, ignore generated sdkconfig)
 sdkconfig
 sdkconfig.old
+sdkconfig.defaults.*
 
 # IDE
 .vscode/

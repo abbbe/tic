@@ -8,7 +8,7 @@
 
 static const char *TAG = "tic_siggen";
 
-#define TIMER_RESOLUTION_HZ 1000000  // 1 MHz = 1us per tick
+#define TIMER_RESOLUTION_HZ 80000000  // 80 MHz = 12.5ns per tick
 
 // Generator A handles
 static mcpwm_timer_handle_t s_timer_a = NULL;
@@ -106,26 +106,18 @@ esp_err_t tic_siggen_init_a(int gpio, uint32_t freq_hz, bool loopback)
         return ret;
     }
 
-    // Create software sync source (shared between A and B)
+    // Create timer sync source from timer A's TEZ event
+    // This allows timer B to sync to timer A's zero point
     if (!s_sync_src) {
-        mcpwm_soft_sync_config_t sync_config = {};
-        ret = mcpwm_new_soft_sync_src(&sync_config, &s_sync_src);
+        mcpwm_timer_sync_src_config_t sync_config = {
+            .timer_event = MCPWM_TIMER_EVENT_EMPTY,  // TEZ - timer equals zero
+            .flags.propagate_input_sync = false,
+        };
+        ret = mcpwm_new_timer_sync_src(s_timer_a, &sync_config, &s_sync_src);
         if (ret != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to create sync source: %s", esp_err_to_name(ret));
+            ESP_LOGE(TAG, "Failed to create timer sync source: %s", esp_err_to_name(ret));
             return ret;
         }
-    }
-
-    // Configure timer A to reset to 0 on sync
-    mcpwm_timer_sync_phase_config_t sync_phase_a = {
-        .sync_src = s_sync_src,
-        .count_value = 0,
-        .direction = MCPWM_TIMER_DIRECTION_UP,
-    };
-    ret = mcpwm_timer_set_phase_on_sync(s_timer_a, &sync_phase_a);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to set sync phase A: %s", esp_err_to_name(ret));
-        return ret;
     }
 
     return ESP_OK;
@@ -145,14 +137,15 @@ esp_err_t tic_siggen_init_b(int gpio, uint32_t freq_hz, int32_t delay_ns, bool l
         return ret;
     }
 
-    // Convert delay from ns to timer ticks (1 MHz = 1000 ns per tick)
-    s_delay_ticks = delay_ns / 1000;
+    // Convert delay from ns to timer ticks (40 MHz = 25 ns per tick)
+    s_delay_ticks = (delay_ns * (TIMER_RESOLUTION_HZ / 1000000)) / 1000;
 
     // Get period for bounds checking
     uint32_t period_ticks = TIMER_RESOLUTION_HZ / freq_hz;
 
-    // Wrap delay into valid range [0, period)
-    int32_t phase_ticks = s_delay_ticks % (int32_t)period_ticks;
+    // For B to LAG A by delay_ticks, B's phase must be (period - delay_ticks)
+    // Because: if B.count > A.count, B reaches 0 (rising edge) BEFORE A
+    int32_t phase_ticks = (-(int32_t)s_delay_ticks) % (int32_t)period_ticks;
     if (phase_ticks < 0) {
         phase_ticks += period_ticks;
     }
@@ -160,14 +153,10 @@ esp_err_t tic_siggen_init_b(int gpio, uint32_t freq_hz, int32_t delay_ns, bool l
     ESP_LOGI(TAG, "B delay: %ld ns = %ld ticks (phase=%ld in period=%lu)",
              (long)delay_ns, (long)s_delay_ticks, (long)phase_ticks, (unsigned long)period_ticks);
 
-    // Create sync source if not already created
+    // Sync source should have been created by init_a
     if (!s_sync_src) {
-        mcpwm_soft_sync_config_t sync_config = {};
-        ret = mcpwm_new_soft_sync_src(&sync_config, &s_sync_src);
-        if (ret != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to create sync source: %s", esp_err_to_name(ret));
-            return ret;
-        }
+        ESP_LOGE(TAG, "Sync source not created - call init_a first");
+        return ESP_ERR_INVALID_STATE;
     }
 
     // Configure timer B to reset to phase_ticks on sync
@@ -201,14 +190,7 @@ esp_err_t tic_siggen_start(void)
         if (ret != ESP_OK) return ret;
     }
 
-    // Trigger sync to align phases
-    if (s_sync_src) {
-        ret = mcpwm_soft_sync_activate(s_sync_src);
-        if (ret != ESP_OK) {
-            ESP_LOGE(TAG, "Failed to activate sync: %s", esp_err_to_name(ret));
-            return ret;
-        }
-    }
+    // Timer sync happens automatically on timer A's TEZ event
 
     return ESP_OK;
 }

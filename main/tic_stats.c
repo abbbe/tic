@@ -355,9 +355,10 @@ void tic_stats_print_delay(const tic_delay_stat_t *stats)
 static void print_header(void)
 {
 #if CONFIG_TIC_OUTPUT_CSV
-    printf("A_N,A_Hz,A_min_us,A_avg_us,A_max_us,A_std_us,"
+    printf("CSV%lu\tA_N,A_Hz,A_min_us,A_avg_us,A_max_us,A_std_us,"
            "B_N,B_Hz,B_min_us,B_avg_us,B_max_us,B_std_us,"
-           "D_N,D_min_ns,D_avg_ns,D_max_ns,D_std_ns,D_missA,D_missB\n");
+           "D_N,D_min_ns,D_avg_ns,D_max_ns,D_std_ns,D_missA,D_missB\n",
+           (unsigned long)s_row_count);
 #else
     ESP_LOGI(TAG, "A_N  |   A_Hz|A_min_us|A_avg_us|A_max_us|A_std_us|"
                   "B_N  |   B_Hz|B_min_us|B_avg_us|B_max_us|B_std_us|"
@@ -403,9 +404,10 @@ void tic_stats_print(const tic_stats_t *stats)
     double d_std = stats->delay.stddev_ns;
 
 #if CONFIG_TIC_OUTPUT_CSV
-    printf("%lu,%.2f,%.3f,%.3f,%.3f,%.3f,"
+    printf("CSV%lu\t%lu,%.2f,%.3f,%.3f,%.3f,%.3f,"
            "%lu,%.2f,%.3f,%.3f,%.3f,%.3f,"
            "%lu,%.3f,%.3f,%.3f,%.3f,%lu,%lu\n",
+           (unsigned long)s_row_count,
            (unsigned long)stats->ch_a.edge_count, a_hz, a_min, a_avg, a_max, a_std,
            (unsigned long)stats->ch_b.edge_count, b_hz, b_min, b_avg, b_max, b_std,
            (unsigned long)stats->delay.count, d_min, d_avg, d_max, d_std,

@@ -29,10 +29,12 @@ Inter-channel delay (B - A):
 
 ## Signal Generator
 
-- Dual PWM outputs with independent frequencies
+- Dual PWM outputs at 80 MHz timer resolution (12.5 ns phase accuracy)
+- Independent frequencies per channel
 - Configurable relative delay (ns) for generator B
+- Timer sync from A's TEZ event ensures precise phase alignment
 - Auto loopback: internal routing when gen GPIO == capture GPIO
-- Frequency range: 1 Hz to 1 MHz
+- Frequency range: 1.2 kHz to 1 MHz (limited by 16-bit timer at 80 MHz)
 
 ## Configuration
 
@@ -126,3 +128,14 @@ typedef struct {
     double min_ns, max_ns, mean_ns, stddev_ns;
 } tic_delay_stat_t;
 ```
+
+## Test Suite
+
+Automated loopback tests in `test/`:
+
+| Script | Frequency | Delay | Tolerance |
+|--------|-----------|-------|-----------|
+| `100-test-f_2kHz.sh` | 2 kHz | 0 ns | 12.5 ns |
+| `110-test-f_2kHz-delay_100ns.sh` | 2 kHz | 100 ns | 12.5 ns |
+
+Python validator (`tic_reader.py`) resets device, captures CSV output, and validates against expected values.

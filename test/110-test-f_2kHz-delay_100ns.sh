@@ -1,8 +1,8 @@
 #!/bin/bash
 #
-# Test: 1 kHz loopback with 100ns delay
+# Test: 2 kHz loopback with 100ns delay
 #
-# Builds TIC with both signal generators at 1 kHz, 100ns relative delay,
+# Builds TIC with both signal generators at 2 kHz, 100ns relative delay,
 # in loopback mode (gen GPIO = capture GPIO), then validates output.
 #
 
@@ -28,6 +28,9 @@ if [ -z "$IDF_PATH" ]; then
     exit 1
 fi
 
+# Expand variables in IDF_PATH (e.g., $HOME)
+eval IDF_PATH="$IDF_PATH"
+
 # Source ESP-IDF
 if [ ! -f "$IDF_PATH/export.sh" ]; then
     echo "ERROR: $IDF_PATH/export.sh not found" >&2
@@ -37,7 +40,7 @@ source "$IDF_PATH/export.sh"
 
 PORT="$TIC1_SERIAL_PORT"
 
-echo "=== TIC Test: 1kHz loopback with 100ns delay ==="
+echo "=== TIC Test: 2kHz loopback with 100ns delay ==="
 echo "Project: $PROJECT_DIR"
 echo "Port: $PORT"
 echo ""
@@ -52,12 +55,10 @@ CONFIG_TIC_INPUT_GPIO_A=4
 CONFIG_TIC_INPUT_GPIO_B=5
 CONFIG_TIC_SIGGEN_A_GPIO=4
 CONFIG_TIC_SIGGEN_B_GPIO=5
-CONFIG_TIC_SIGGEN_A_FREQ_HZ=1000
-CONFIG_TIC_SIGGEN_B_FREQ_HZ=1000
+CONFIG_TIC_SIGGEN_A_FREQ_HZ=2000
+CONFIG_TIC_SIGGEN_B_FREQ_HZ=2000
 CONFIG_TIC_SIGGEN_B_DELAY_NS=100
 CONFIG_TIC_OUTPUT_CSV=y
-CONFIG_TIC_STATS_PERIOD_MS=500
-CONFIG_TIC_EDGES_PER_BUFFER=2048
 EOF
 
 # Clean and build with test config
@@ -76,11 +77,11 @@ echo "=== Running validation ==="
 python3 "$SCRIPT_DIR/tic_reader.py" \
     --port "$PORT" \
     --duration 10 \
-    --expected-freq-a 1000 \
-    --expected-freq-b 1000 \
+    --expected-freq-a 2000 \
+    --expected-freq-b 2000 \
     --expected-delay 100 \
-    --freq-tolerance 1.0 \
-    --delay-tolerance 50
+    --freq-tolerance 0 \
+    --delay-tolerance 12.5
 
 # Cleanup
 rm -f sdkconfig.defaults.test

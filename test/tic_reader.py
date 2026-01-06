@@ -4,20 +4,22 @@ TIC serial reader - reads CSV output and validates results.
 
 Usage:
     python tic_reader.py --port /dev/ttyUSB0 --duration 5 \
-        --expected-freq-a 1000 --expected-freq-b 1000 --expected-delay 100
+        --expected-freq-a 2000 --expected-freq-b 2000 --expected-delay 100
 """
 
 import argparse
 import serial
 import sys
 import time
+import re
 from dataclasses import dataclass
-from typing import Optional, List
+from typing import Optional, List, Tuple
 
 
 @dataclass
 class TicRow:
     """Parsed CSV row from TIC output."""
+    seq: int
     a_n: int
     a_hz: float
     a_min_us: float
@@ -39,18 +41,31 @@ class TicRow:
     d_miss_b: int
 
 
-def parse_csv_line(line: str) -> Optional[TicRow]:
-    """Parse a CSV line into a TicRow. Returns None if not a data line."""
+def parse_csv_line(line: str) -> Tuple[Optional[int], Optional[TicRow]]:
+    """Parse a CSV line. Returns (seq, row) or (seq, None) for header or (None, None) for non-CSV."""
     line = line.strip()
-    if not line or line.startswith('A_N'):  # Skip header
-        return None
+    if not line:
+        return None, None
 
-    parts = line.split(',')
+    # Must start with CSV<seq><tab>
+    match = re.match(r'^CSV(\d+)\t(.*)$', line)
+    if not match:
+        return None, None
+
+    seq = int(match.group(1))
+    rest = match.group(2)
+
+    # Check if header (starts with A_N)
+    if rest.startswith('A_N'):
+        return seq, None
+
+    parts = rest.split(',')
     if len(parts) != 19:
-        return None
+        return None, None
 
     try:
-        return TicRow(
+        return seq, TicRow(
+            seq=seq,
             a_n=int(parts[0]),
             a_hz=float(parts[1]),
             a_min_us=float(parts[2]),
@@ -72,57 +87,93 @@ def parse_csv_line(line: str) -> Optional[TicRow]:
             d_miss_b=int(parts[18]),
         )
     except (ValueError, IndexError):
-        return None
+        return None, None
 
 
 def reset_device(ser: serial.Serial) -> None:
-    """Reset device using DTR/RTS sequence (ESP32 auto-reset)."""
-    ser.dtr = False
-    ser.rts = True
+    """Reset device via RTS (EN) while keeping DTR low (GPIO0 high for normal boot)."""
+    ser.dtr = False  # GPIO0 high = normal boot (not download mode)
+    ser.rts = True   # EN low = reset
     time.sleep(0.1)
-    ser.rts = False
-    time.sleep(0.1)
-    ser.dtr = True
-    time.sleep(0.5)  # Wait for boot
+    ser.rts = False  # EN high = run
 
 
-def read_tic_data(port: str, baudrate: int, duration: float, quiet: bool = False) -> List[TicRow]:
-    """Read TIC CSV data from serial port for specified duration."""
+def wait_for_boot(ser: serial.Serial, timeout: float = 5.0) -> bool:
+    """Wait for ESP-IDF boot marker. Returns True if found."""
+    start = time.time()
+    while time.time() - start < timeout:
+        if ser.in_waiting:
+            try:
+                line = ser.readline().decode('utf-8', errors='ignore')
+                if 'ESP-IDF' in line:
+                    return True
+            except Exception:
+                pass
+    return False
+
+
+def read_tic_data(port: str, baudrate: int, duration: float, max_lines: int,
+                  quiet: bool = False) -> Tuple[List[TicRow], List[str]]:
+    """Read TIC CSV data from serial port. Returns (rows, errors)."""
     rows = []
+    errors = []
+    expected_seq = 0
 
     with serial.Serial(port, baudrate, timeout=1) as ser:
         reset_device(ser)
 
-        # Flush any boot messages
-        time.sleep(1)
-        ser.reset_input_buffer()
+        # Wait for boot marker
+        if not wait_for_boot(ser):
+            errors.append("Timeout waiting for ESP-IDF boot marker")
+            return rows, errors
 
         start = time.time()
-        while time.time() - start < duration:
+        while True:
+            # Check termination conditions
+            if duration > 0 and time.time() - start >= duration:
+                break
+            if max_lines > 0 and len(rows) >= max_lines:
+                break
+
             if ser.in_waiting:
                 try:
                     line = ser.readline().decode('utf-8', errors='ignore')
-                    row = parse_csv_line(line)
-                    if row:
-                        rows.append(row)
-                        if not quiet:
-                            print(f"  Row: A={row.a_hz:.1f}Hz B={row.b_hz:.1f}Hz "
-                                  f"delay={row.d_avg_ns:.1f}ns", file=sys.stderr)
-                except Exception:
-                    pass  # Ignore decode errors
+                    seq, row = parse_csv_line(line)
 
-    return rows
+                    if seq is not None:
+                        # Check sequence
+                        if seq != expected_seq:
+                            errors.append(f"Sequence error: expected {expected_seq}, got {seq}")
+                        expected_seq = seq + 1
+
+                        if row:
+                            rows.append(row)
+                            if not quiet:
+                                print(f"  CSV{seq}: A={row.a_hz:.1f}Hz B={row.b_hz:.1f}Hz "
+                                      f"delay={row.d_avg_ns:.1f}ns", file=sys.stderr)
+                except Exception:
+                    pass
+
+    return rows, errors
 
 
 def validate_results(
     rows: List[TicRow],
+    errors: List[str],
     expected_freq_a: float,
     expected_freq_b: float,
     expected_delay_ns: float,
-    freq_tolerance_pct: float = 1.0,
-    delay_tolerance_ns: float = 50.0,
+    freq_tolerance_pct: float = 0.0,
+    delay_tolerance_ns: float = 12.5,
 ) -> bool:
     """Validate collected results against expected values."""
+
+    ok = True
+
+    # Report sequence errors
+    for err in errors:
+        print(f"ERROR: {err}")
+        ok = False
 
     if not rows:
         print("FAIL: No data rows received")
@@ -138,19 +189,19 @@ def validate_results(
     print(f"  Channel B: {avg_b_hz:.2f} Hz (expected {expected_freq_b:.2f} Hz)")
     print(f"  Delay B-A: {avg_delay:.2f} ns (expected {expected_delay_ns:.2f} ns)")
 
-    ok = True
-
     # Check frequency A
-    freq_a_err = abs(avg_a_hz - expected_freq_a) / expected_freq_a * 100
-    if freq_a_err > freq_tolerance_pct:
-        print(f"FAIL: Channel A frequency error {freq_a_err:.2f}% > {freq_tolerance_pct}%")
-        ok = False
+    if expected_freq_a > 0:
+        freq_a_err = abs(avg_a_hz - expected_freq_a) / expected_freq_a * 100
+        if freq_a_err > freq_tolerance_pct:
+            print(f"FAIL: Channel A frequency error {freq_a_err:.2f}% > {freq_tolerance_pct}%")
+            ok = False
 
     # Check frequency B
-    freq_b_err = abs(avg_b_hz - expected_freq_b) / expected_freq_b * 100
-    if freq_b_err > freq_tolerance_pct:
-        print(f"FAIL: Channel B frequency error {freq_b_err:.2f}% > {freq_tolerance_pct}%")
-        ok = False
+    if expected_freq_b > 0:
+        freq_b_err = abs(avg_b_hz - expected_freq_b) / expected_freq_b * 100
+        if freq_b_err > freq_tolerance_pct:
+            print(f"FAIL: Channel B frequency error {freq_b_err:.2f}% > {freq_tolerance_pct}%")
+            ok = False
 
     # Check delay
     delay_err = abs(avg_delay - expected_delay_ns)
@@ -170,28 +221,34 @@ def main():
                         help='Serial port')
     parser.add_argument('--baudrate', '-b', type=int, default=115200,
                         help='Baud rate (default: 115200)')
-    parser.add_argument('--duration', '-d', type=float, default=5.0,
-                        help='Read duration in seconds (default: 5)')
+    parser.add_argument('--duration', '-d', type=float, default=0,
+                        help='Read duration in seconds (default: 0 = unlimited)')
+    parser.add_argument('--lines', '-n', type=int, default=0,
+                        help='Number of CSV data lines to capture (default: 0 = unlimited)')
     parser.add_argument('--expected-freq-a', type=float, default=1000.0,
                         help='Expected frequency A in Hz (default: 1000)')
     parser.add_argument('--expected-freq-b', type=float, default=1000.0,
                         help='Expected frequency B in Hz (default: 1000)')
     parser.add_argument('--expected-delay', type=float, default=0.0,
                         help='Expected delay B-A in ns (default: 0)')
-    parser.add_argument('--freq-tolerance', type=float, default=1.0,
-                        help='Frequency tolerance in percent (default: 1.0)')
-    parser.add_argument('--delay-tolerance', type=float, default=50.0,
-                        help='Delay tolerance in ns (default: 50)')
+    parser.add_argument('--freq-tolerance', type=float, default=0.0,
+                        help='Frequency tolerance in percent (default: 0)')
+    parser.add_argument('--delay-tolerance', type=float, default=12.5,
+                        help='Delay tolerance in ns (default: 12.5)')
     parser.add_argument('--quiet', '-q', action='store_true',
                         help='Suppress per-row output')
 
     args = parser.parse_args()
 
-    print(f"Reading TIC data from {args.port} for {args.duration}s...")
-    rows = read_tic_data(args.port, args.baudrate, args.duration, args.quiet)
+    if args.duration <= 0 and args.lines <= 0:
+        parser.error("Must specify --duration or --lines")
+
+    print(f"Reading TIC data from {args.port}...", file=sys.stderr)
+    rows, errors = read_tic_data(args.port, args.baudrate, args.duration, args.lines, args.quiet)
 
     ok = validate_results(
         rows,
+        errors,
         args.expected_freq_a,
         args.expected_freq_b,
         args.expected_delay,
