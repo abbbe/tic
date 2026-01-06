@@ -3,14 +3,14 @@
 TIC serial reader - reads CSV output and validates results.
 
 Usage:
-    python tic_reader.py --port /dev/ttyUSB0 --duration 5 --expected-freq 1000 --expected-delay 100
+    python tic_reader.py --port /dev/ttyUSB0 --duration 5 \
+        --expected-freq-a 1000 --expected-freq-b 1000 --expected-delay 100
 """
 
 import argparse
 import serial
 import sys
 import time
-import re
 from dataclasses import dataclass
 from typing import Optional, List
 
@@ -86,7 +86,7 @@ def reset_device(ser: serial.Serial) -> None:
     time.sleep(0.5)  # Wait for boot
 
 
-def read_tic_data(port: str, baudrate: int, duration: float) -> List[TicRow]:
+def read_tic_data(port: str, baudrate: int, duration: float, quiet: bool = False) -> List[TicRow]:
     """Read TIC CSV data from serial port for specified duration."""
     rows = []
 
@@ -105,8 +105,10 @@ def read_tic_data(port: str, baudrate: int, duration: float) -> List[TicRow]:
                     row = parse_csv_line(line)
                     if row:
                         rows.append(row)
-                        print(f"  Row: A={row.a_hz:.1f}Hz B={row.b_hz:.1f}Hz delay={row.d_avg_ns:.1f}ns")
-                except Exception as e:
+                        if not quiet:
+                            print(f"  Row: A={row.a_hz:.1f}Hz B={row.b_hz:.1f}Hz "
+                                  f"delay={row.d_avg_ns:.1f}ns", file=sys.stderr)
+                except Exception:
                     pass  # Ignore decode errors
 
     return rows
@@ -180,11 +182,13 @@ def main():
                         help='Frequency tolerance in percent (default: 1.0)')
     parser.add_argument('--delay-tolerance', type=float, default=50.0,
                         help='Delay tolerance in ns (default: 50)')
+    parser.add_argument('--quiet', '-q', action='store_true',
+                        help='Suppress per-row output')
 
     args = parser.parse_args()
 
     print(f"Reading TIC data from {args.port} for {args.duration}s...")
-    rows = read_tic_data(args.port, args.baudrate, args.duration)
+    rows = read_tic_data(args.port, args.baudrate, args.duration, args.quiet)
 
     ok = validate_results(
         rows,

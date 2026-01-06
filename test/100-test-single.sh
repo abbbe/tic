@@ -10,10 +10,14 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-PORT="${TIC_PORT:-/dev/tty.usbserial-*}"
 
-# Expand glob for port
-PORT=$(echo $PORT)
+# Source .env if exists
+if [ -f "$SCRIPT_DIR/.env" ]; then
+    source "$SCRIPT_DIR/.env"
+fi
+
+# Default port if not set
+PORT="${TIC_PORT:-/dev/ttyUSB0}"
 
 echo "=== TIC Test: 1kHz loopback with 100ns delay ==="
 echo "Project: $PROJECT_DIR"
