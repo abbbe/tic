@@ -1,14 +1,12 @@
 #!/bin/bash
 #
-# Multi-device test: 3 interconnected TIC devices
+# Test: Two interconnected devices at 2 kHz
 #
 # Topology (device.gpio):
-#   1.4 ← 2.6    D2 Gen A → D1 Cap A
-#   1.5 ← 3.6    D3 Gen A → D1 Cap B
 #   1.6 → 2.4    D1 Gen A → D2 Cap A
-#   1.7 → 3.4    D1 Gen B → D3 Cap A
-#   2.7 → 3.5    D2 Gen B → D3 Cap B
-#   3.7 → 2.5    D3 Gen B → D2 Cap B
+#   1.7 → 2.5    D1 Gen B → D2 Cap B
+#   2.6 → 1.4    D2 Gen A → D1 Cap A
+#   2.7 → 1.5    D2 Gen B → D1 Cap B
 #   + Common GND
 #
 
@@ -25,22 +23,22 @@ FREQ_TOLERANCE_PPM=100
 
 # Create timestamped log directory
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-LOG_DIR="$SCRIPT_DIR/logs/multi_$TIMESTAMP"
+LOG_DIR="$SCRIPT_DIR/logs/dual_$TIMESTAMP"
 mkdir -p "$LOG_DIR"
 
-echo "=== TIC Multi-Device Test ==="
+echo "=== TIC Dual-Device Test ==="
 echo "Log directory: $LOG_DIR"
 
-# Build and flash all devices
-"$SCRIPT_DIR/bin/idf" -f $FREQ_HZ -d 0 build flash tic1 tic2 tic3 2>&1 | tee "$LOG_DIR/build_flash.log"
+# Build and flash both devices
+"$SCRIPT_DIR/bin/idf" -f $FREQ_HZ -d 0 build flash tic1 tic2 2>&1 | tee "$LOG_DIR/build_flash.log"
 
 # Small delay to let devices settle
 sleep 1
 
-# Run multi-device test
+# Run dual-device test
 echo ""
-echo "=== Running multi-device test ==="
-PORTS="$TIC1_SERIAL_PORT,$TIC2_SERIAL_PORT,$TIC3_SERIAL_PORT"
+echo "=== Running dual-device test ==="
+PORTS="$TIC1_SERIAL_PORT,$TIC2_SERIAL_PORT"
 
 "$SCRIPT_DIR/.venv/bin/python3" "$SCRIPT_DIR/tic_multi_reader.py" \
     --ports "$PORTS" \

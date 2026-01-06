@@ -1,6 +1,8 @@
 #!/bin/bash
 #
-# Test: 2 kHz loopback with 100ns delay
+# Test: 2 kHz with external wiring, 100ns delay
+#
+# Single device with external wires: GPIO 6→4, 7→5
 #
 
 set -e
@@ -8,8 +10,8 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/.env"
 
-# Build and flash
-"$SCRIPT_DIR/bin/idf" -m loopback -f 2000 -d 100 build flash tic1
+# Build and flash (normal mode = external wiring)
+"$SCRIPT_DIR/bin/idf" -f 2000 -d 100 build flash tic1
 
 # Validate
 echo ""

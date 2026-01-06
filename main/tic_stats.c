@@ -83,6 +83,10 @@ void tic_stats_process(const tic_event_t *events, size_t event_count,
     init_delay_stats(&stats->delay);
 
     if (event_count < 1) {
+        // Finalize with zeros to clear DBL_MAX/DBL_MIN init values
+        finalize_channel_stats(&stats->ch_a, 0, 0, 0);
+        finalize_channel_stats(&stats->ch_b, 0, 0, 0);
+        finalize_delay_stats(&stats->delay, 0, 0, 0);
         return;
     }
 
@@ -215,15 +219,41 @@ void tic_stats_process(const tic_event_t *events, size_t event_count,
         // Can't calculate delays without both channels
         stats->delay.missed_a = a_count;
         stats->delay.missed_b = b_count;
+        // Zero out min/max (they're still at DBL_MAX/-DBL_MAX from init)
+        stats->delay.min_ns = 0.0;
+        stats->delay.max_ns = 0.0;
         return;
     }
 
     // Calculate window in ticks for faster comparison
     int64_t window_ticks = (int64_t)(window_ns / ns_per_tick);
 
-    // Linear O(n) algorithm: process events in order, match each A with nearest B
-    // Since events are chronological, only search nearby events (limited lookahead)
-    const size_t MAX_LOOKAHEAD = 10;  // Search up to 10 events ahead/behind
+    // Allocate array to track which B edges have been matched (1:1 matching)
+    bool *b_matched = calloc(b_count, sizeof(bool));
+    if (!b_matched) {
+        ESP_LOGE(TAG, "Failed to allocate b_matched array");
+        return;
+    }
+
+    // Build index of B edge positions for efficient lookup
+    size_t *b_indices = malloc(b_count * sizeof(size_t));
+    if (!b_indices) {
+        free(b_matched);
+        ESP_LOGE(TAG, "Failed to allocate b_indices array");
+        return;
+    }
+    size_t b_idx = 0;
+    for (size_t i = 0; i < event_count && b_idx < b_count; i++) {
+        if (events[i].type == TIC_EVENT_EDGE && events[i].channel == TIC_CHANNEL_B) {
+            b_indices[b_idx++] = i;
+        }
+    }
+
+    // Linear O(n) algorithm: process events in order, match each A with nearest unmatched B
+    // Only advance search position when we actually match, so spurious edges don't skew subsequent matches
+    const size_t MAX_LOOKAHEAD = 10;  // Search up to 10 B edges ahead/behind
+
+    size_t last_matched_b = 0;  // Track last matched B index (not event position)
 
     for (size_t i = 0; i < event_count; i++) {
         const tic_event_t *evt_a = &events[i];
@@ -232,20 +262,17 @@ void tic_stats_process(const tic_event_t *events, size_t event_count,
             continue;
         }
 
-        // Search for closest B within limited range (before and after)
+        // Search for closest unmatched B within limited range around last match
         int64_t best_delay_ticks = INT64_MAX;
-        bool found_match = false;
+        size_t best_b_idx = SIZE_MAX;
 
-        // Search backward and forward from current position
-        size_t start = (i > MAX_LOOKAHEAD) ? (i - MAX_LOOKAHEAD) : 0;
-        size_t end = (i + MAX_LOOKAHEAD < event_count) ? (i + MAX_LOOKAHEAD) : event_count;
+        size_t search_start = (last_matched_b > MAX_LOOKAHEAD) ? (last_matched_b - MAX_LOOKAHEAD) : 0;
+        size_t search_end = (last_matched_b + MAX_LOOKAHEAD + 1 < b_count) ? (last_matched_b + MAX_LOOKAHEAD + 1) : b_count;
 
-        for (size_t j = start; j < end; j++) {
-            const tic_event_t *evt_b = &events[j];
+        for (size_t bi = search_start; bi < search_end; bi++) {
+            if (b_matched[bi]) continue;  // Skip already matched B edges
 
-            if (evt_b->type != TIC_EVENT_EDGE || evt_b->channel != TIC_CHANNEL_B) {
-                continue;
-            }
+            const tic_event_t *evt_b = &events[b_indices[bi]];
 
             // Calculate delay (B - A) in ticks
             int64_t delay_ticks = (int64_t)evt_b->value - (int64_t)evt_a->value;
@@ -254,12 +281,14 @@ void tic_stats_process(const tic_event_t *events, size_t event_count,
             if (llabs(delay_ticks) < window_ticks) {
                 if (llabs(delay_ticks) < llabs(best_delay_ticks)) {
                     best_delay_ticks = delay_ticks;
-                    found_match = true;
+                    best_b_idx = bi;
                 }
             }
         }
 
-        if (found_match) {
+        if (best_b_idx != SIZE_MAX) {
+            b_matched[best_b_idx] = true;  // Mark B as consumed
+            last_matched_b = best_b_idx;   // Advance search position only on match
             double delay_ns = (double)best_delay_ticks * ns_per_tick;
 
             // Update delay statistics using Welford's
@@ -273,6 +302,9 @@ void tic_stats_process(const tic_event_t *events, size_t event_count,
             if (delay_ns > stats->delay.max_ns) stats->delay.max_ns = delay_ns;
         }
     }
+
+    free(b_matched);
+    free(b_indices);
 
     // Calculate missed pulses
     stats->delay.missed_a = a_count - n_delay;

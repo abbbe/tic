@@ -91,12 +91,12 @@ static bool IRAM_ATTR capture_callback(mcpwm_cap_channel_handle_t cap_chan,
     return high_task_woken == pdTRUE;
 }
 
-esp_err_t tic_capture_init(int gpio_a, int gpio_b, bool loopback_a, bool loopback_b, size_t edges_per_buffer)
+esp_err_t tic_capture_init(int gpio_a, int gpio_b, size_t edges_per_buffer)
 {
     esp_err_t ret;
 
-    ESP_LOGI(TAG, "Initializing capture: GPIO_A=%d (lb=%d), GPIO_B=%d (lb=%d), edges=%zu",
-             gpio_a, loopback_a, gpio_b, loopback_b, edges_per_buffer);
+    ESP_LOGI(TAG, "Initializing capture: GPIO_A=%d, GPIO_B=%d, edges=%zu",
+             gpio_a, gpio_b, edges_per_buffer);
 
     // Validate and set edges per buffer
     if (edges_per_buffer == 0 || edges_per_buffer > CONFIG_TIC_MAX_BUFFER_SIZE) {
@@ -133,6 +133,8 @@ esp_err_t tic_capture_init(int gpio_a, int gpio_b, bool loopback_a, bool loopbac
              (unsigned long)s_resolution_hz, 1e9 / s_resolution_hz);
 
     // Create Channel A
+    // Note: Don't enable io_loop_back here - the generator's loopback already
+    // feeds the signal to the GPIO. Enabling both causes double-triggering.
     mcpwm_capture_channel_config_t cap_ch_config_a = {
         .gpio_num = gpio_a,
         .prescale = 1,
@@ -140,7 +142,7 @@ esp_err_t tic_capture_init(int gpio_a, int gpio_b, bool loopback_a, bool loopbac
         .flags.neg_edge = false,
         .flags.pull_up = false,
         .flags.pull_down = false,
-        .flags.io_loop_back = loopback_a,
+        .flags.io_loop_back = false,
     };
     ret = mcpwm_new_capture_channel(s_cap_timer, &cap_ch_config_a, &s_cap_channel_a);
     if (ret != ESP_OK) {
@@ -175,7 +177,7 @@ esp_err_t tic_capture_init(int gpio_a, int gpio_b, bool loopback_a, bool loopbac
             .flags.neg_edge = false,
             .flags.pull_up = false,
             .flags.pull_down = false,
-            .flags.io_loop_back = loopback_b,
+            .flags.io_loop_back = false,
         };
         ret = mcpwm_new_capture_channel(s_cap_timer, &cap_ch_config_b, &s_cap_channel_b);
         if (ret != ESP_OK) {

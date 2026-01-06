@@ -63,7 +63,7 @@ void app_main(void)
 
     // Initialize capture module
     ret = tic_capture_init(CONFIG_TIC_INPUT_GPIO_A, CONFIG_TIC_INPUT_GPIO_B,
-                            loopback_a, loopback_b, CONFIG_TIC_EDGES_PER_BUFFER);
+                            CONFIG_TIC_EDGES_PER_BUFFER);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to initialize capture module");
         return;

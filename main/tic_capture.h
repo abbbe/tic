@@ -31,12 +31,10 @@ typedef struct {
  *
  * @param gpio_a GPIO pin for Channel A capture input
  * @param gpio_b GPIO pin for Channel B capture input (-1 to disable)
- * @param loopback_a Enable internal loopback on Channel A
- * @param loopback_b Enable internal loopback on Channel B
  * @param edges_per_buffer Number of edges to capture before swapping buffers
  * @return ESP_OK on success
  */
-esp_err_t tic_capture_init(int gpio_a, int gpio_b, bool loopback_a, bool loopback_b, size_t edges_per_buffer);
+esp_err_t tic_capture_init(int gpio_a, int gpio_b, size_t edges_per_buffer);
 
 /**
  * @brief Start capturing on all enabled channels
