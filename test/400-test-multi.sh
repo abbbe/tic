@@ -17,44 +17,18 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 source "$SCRIPT_DIR/.env"
 
-# Test parameters
-FREQ_HZ=2000
-SAMPLES=15
-SKIP_SAMPLES=3
-FREQ_TOLERANCE_PPM=100
-
-# Create timestamped log directory
-TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-LOG_DIR="$SCRIPT_DIR/logs/multi_$TIMESTAMP"
-mkdir -p "$LOG_DIR"
-
-echo "=== TIC Multi-Device Test ==="
-echo "Log directory: $LOG_DIR"
-
 # Build and flash all devices
-"$SCRIPT_DIR/bin/idf" -f $FREQ_HZ -d 0 build flash tic1 tic2 tic3 2>&1 | tee "$LOG_DIR/build_flash.log"
+"$SCRIPT_DIR/bin/idf" -f 2000 -d 0 build flash tic1 tic2 tic3
 
-# Small delay to let devices settle
-sleep 1
-
-# Run multi-device test
+# Validate
 echo ""
-echo "=== Running multi-device test ==="
-PORTS="$TIC1_SERIAL_PORT,$TIC2_SERIAL_PORT,$TIC3_SERIAL_PORT"
-
+echo "=== Running validation ==="
 "$SCRIPT_DIR/.venv/bin/python3" "$SCRIPT_DIR/tic_multi_reader.py" \
-    --ports "$PORTS" \
-    --samples $SAMPLES \
-    --skip-samples $SKIP_SAMPLES \
-    --expected-freq $FREQ_HZ \
-    --freq-tolerance-ppm $FREQ_TOLERANCE_PPM \
-    --output "$LOG_DIR/raw_data.csv" \
-    2>&1 | tee "$LOG_DIR/test_output.log"
-
-EXIT_CODE=${PIPESTATUS[0]}
+    --ports "$TIC1_SERIAL_PORT,$TIC2_SERIAL_PORT,$TIC3_SERIAL_PORT" \
+    --samples 15 \
+    --skip-samples 3 \
+    --expected-freq 2000 \
+    --freq-tolerance-ppm 100
 
 echo ""
 echo "=== Test complete ==="
-echo "Logs: $LOG_DIR/"
-
-exit $EXIT_CODE
