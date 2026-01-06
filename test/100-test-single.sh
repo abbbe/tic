@@ -11,13 +11,31 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
-# Source .env if exists
-if [ -f "$SCRIPT_DIR/.env" ]; then
-    source "$SCRIPT_DIR/.env"
+# Source .env (required)
+if [ ! -f "$SCRIPT_DIR/.env" ]; then
+    echo "ERROR: $SCRIPT_DIR/.env not found. Copy .env.sample and configure." >&2
+    exit 1
+fi
+source "$SCRIPT_DIR/.env"
+
+# Validate required variables
+if [ -z "$TIC1_SERIAL_PORT" ]; then
+    echo "ERROR: TIC1_SERIAL_PORT not set in .env" >&2
+    exit 1
+fi
+if [ -z "$IDF_PATH" ]; then
+    echo "ERROR: IDF_PATH not set in .env" >&2
+    exit 1
 fi
 
-# Default port if not set
-PORT="${TIC_PORT:-/dev/ttyUSB0}"
+# Source ESP-IDF
+if [ ! -f "$IDF_PATH/export.sh" ]; then
+    echo "ERROR: $IDF_PATH/export.sh not found" >&2
+    exit 1
+fi
+source "$IDF_PATH/export.sh"
+
+PORT="$TIC1_SERIAL_PORT"
 
 echo "=== TIC Test: 1kHz loopback with 100ns delay ==="
 echo "Project: $PROJECT_DIR"

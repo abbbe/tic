@@ -17,23 +17,25 @@ Automated tests for validating TIC functionality.
    cp .env.sample .env
    ```
 
-3. Edit `.env` with your serial port:
+3. Edit `.env` with your settings (all fields required):
    ```bash
    # Find your port
    ls /dev/tty.usb*      # macOS
    ls /dev/ttyUSB*       # Linux
 
    # Edit .env
-   TIC_PORT=/dev/tty.usbserial-0001
+   TIC1_SERIAL_PORT=/dev/tty.usbserial-0001
+   IDF_PATH=~/esp/esp-idf
    ```
 
 ## Running Tests
 
 ```bash
 source .venv/bin/activate
-source .env
 ./100-test-single.sh
 ```
+
+The script automatically sources `.env` and ESP-IDF.
 
 ## Test Scripts
 
@@ -64,7 +66,7 @@ python tic_reader.py --port /dev/ttyUSB0 --duration 5 \
 **Options:**
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--port`, `-p` | /dev/ttyUSB0 | Serial port |
+| `--port`, `-p` | (required) | Serial port |
 | `--baudrate`, `-b` | 115200 | Baud rate |
 | `--duration`, `-d` | 5 | Read duration (seconds) |
 | `--expected-freq-a` | 1000 | Expected frequency A (Hz) |

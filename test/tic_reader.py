@@ -166,8 +166,8 @@ def validate_results(
 
 def main():
     parser = argparse.ArgumentParser(description='TIC serial reader and validator')
-    parser.add_argument('--port', '-p', default='/dev/ttyUSB0',
-                        help='Serial port (default: /dev/ttyUSB0)')
+    parser.add_argument('--port', '-p', required=True,
+                        help='Serial port')
     parser.add_argument('--baudrate', '-b', type=int, default=115200,
                         help='Baud rate (default: 115200)')
     parser.add_argument('--duration', '-d', type=float, default=5.0,
