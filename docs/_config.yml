@@ -1,0 +1,5 @@
+title: TIC - Time Interval Counter
+description: Dual-channel time interval counter for ESP32-S3
+theme: minima
+baseurl: "/tic"
+url: ""
