@@ -1,8 +1,10 @@
 #include "tic_stats.h"
 #include "esp_log.h"
+#include "sdkconfig.h"
 #include <math.h>
 #include <float.h>
 #include <stdlib.h>
+#include <stdio.h>
 
 static const char *TAG = "tic_stats";
 
@@ -352,20 +354,32 @@ void tic_stats_print_delay(const tic_delay_stat_t *stats)
 
 static void print_header(void)
 {
+#if CONFIG_TIC_OUTPUT_CSV
+    printf("A_N,A_Hz,A_min_us,A_avg_us,A_max_us,A_std_us,"
+           "B_N,B_Hz,B_min_us,B_avg_us,B_max_us,B_std_us,"
+           "D_N,D_min_ns,D_avg_ns,D_max_ns,D_std_ns,D_missA,D_missB\n");
+#else
     ESP_LOGI(TAG, "A_N  |   A_Hz|A_min_us|A_avg_us|A_max_us|A_std_us|"
                   "B_N  |   B_Hz|B_min_us|B_avg_us|B_max_us|B_std_us|"
                   "D_N  |D_min_ns|D_avg_ns|D_max_ns|D_std_ns|D_missA|D_missB");
     ESP_LOGI(TAG, "-----|-------|--------|--------|--------|--------|"
                   "-----|-------|--------|--------|--------|--------|"
                   "-----|--------|--------|--------|--------|-------|-------");
+#endif
 }
 
 void tic_stats_print(const tic_stats_t *stats)
 {
-    // Print header every 24 rows
+    // Print header: once for CSV, every 24 rows for table
+#if CONFIG_TIC_OUTPUT_CSV
+    if (s_row_count == 0) {
+        print_header();
+    }
+#else
     if (s_row_count % 24 == 0) {
         print_header();
     }
+#endif
     s_row_count++;
 
     // Channel A values
@@ -388,6 +402,15 @@ void tic_stats_print(const tic_stats_t *stats)
     double d_max = stats->delay.max_ns;
     double d_std = stats->delay.stddev_ns;
 
+#if CONFIG_TIC_OUTPUT_CSV
+    printf("%lu,%.2f,%.3f,%.3f,%.3f,%.3f,"
+           "%lu,%.2f,%.3f,%.3f,%.3f,%.3f,"
+           "%lu,%.3f,%.3f,%.3f,%.3f,%lu,%lu\n",
+           (unsigned long)stats->ch_a.edge_count, a_hz, a_min, a_avg, a_max, a_std,
+           (unsigned long)stats->ch_b.edge_count, b_hz, b_min, b_avg, b_max, b_std,
+           (unsigned long)stats->delay.count, d_min, d_avg, d_max, d_std,
+           (unsigned long)stats->delay.missed_a, (unsigned long)stats->delay.missed_b);
+#else
     ESP_LOGI(TAG, "%5lu|%7.2f|%8.3f|%8.3f|%8.3f|%8.3f|"
                   "%5lu|%7.2f|%8.3f|%8.3f|%8.3f|%8.3f|"
                   "%5lu|%8.3f|%8.3f|%8.3f|%8.3f|%7lu|%7lu",
@@ -395,4 +418,5 @@ void tic_stats_print(const tic_stats_t *stats)
              (unsigned long)stats->ch_b.edge_count, b_hz, b_min, b_avg, b_max, b_std,
              (unsigned long)stats->delay.count, d_min, d_avg, d_max, d_std,
              (unsigned long)stats->delay.missed_a, (unsigned long)stats->delay.missed_b);
+#endif
 }

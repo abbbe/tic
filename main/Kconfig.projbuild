@@ -81,4 +81,11 @@ menu "TIC Configuration"
             Maximum time between statistics reports, even if edge count
             threshold is not reached. Ensures periodic output with slow signals.
 
+    config TIC_OUTPUT_CSV
+        bool "CSV output format"
+        default n
+        help
+            Output statistics in CSV format instead of table format.
+            Useful for automated testing and data processing.
+
 endmenu
