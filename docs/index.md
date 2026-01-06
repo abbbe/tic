@@ -30,8 +30,8 @@ idf.py build flash monitor
 
 | Pin | Default GPIO | Function |
 |-----|--------------|----------|
-| Ch A | GPIO1 | Input capture |
-| Ch B | GPIO2 | Input capture |
+| Ch A | GPIO4 | Input capture |
+| Ch B | GPIO5 | Input capture |
 
 3.3V logic, rising edge triggered.
 

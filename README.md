@@ -16,8 +16,8 @@ Dual-channel time interval counter using MCPWM capture. Measures signal period a
 - Input signals: 3.3V logic level, rising edge triggered
 
 Default GPIOs (configurable via menuconfig):
-- Channel A: GPIO1
-- Channel B: GPIO2
+- Channel A: GPIO4
+- Channel B: GPIO5
 
 ## Build
 
@@ -34,8 +34,8 @@ idf.py build flash monitor
 | Option | Default | Description |
 |--------|---------|-------------|
 | `TIC_LOOPBACK_TEST_MODE` | off | Internal test signal on Channel A |
-| `TIC_INPUT_GPIO_A` | 1 | Channel A input pin |
-| `TIC_INPUT_GPIO_B` | 2 | Channel B input pin |
+| `TIC_INPUT_GPIO_A` | 4 | Channel A input pin |
+| `TIC_INPUT_GPIO_B` | 5 | Channel B input pin |
 | `TIC_EDGES_PER_BUFFER` | 8192 | Buffer swap threshold |
 | `TIC_STATS_PERIOD_MS` | 1000 | Max time between stats (ms) |
 | `TIC_PWM_OUTPUT_ENABLE` | off | Generate PWM on separate pin |

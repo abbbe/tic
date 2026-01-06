@@ -40,8 +40,8 @@ All options via `idf.py menuconfig`:
 ```
 TIC Configuration
 ├── Loopback test mode [off]
-├── Channel A GPIO [1]
-├── Channel B GPIO [2]
+├── Channel A GPIO [4]
+├── Channel B GPIO [5]
 ├── Edges per buffer [8192]
 ├── Stats period [1000 ms]
 └── External PWM Output
