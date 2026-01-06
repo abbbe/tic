@@ -36,6 +36,7 @@ idf.py build flash monitor
 | `TIC_LOOPBACK_TEST_MODE` | off | Internal test signal on Channel A |
 | `TIC_INPUT_GPIO_A` | 4 | Channel A input pin |
 | `TIC_INPUT_GPIO_B` | 5 | Channel B input pin |
+| `TIC_MAX_BUFFER_SIZE` | 8192 | Max events per buffer (RAM: 2 × N × 8 bytes) |
 | `TIC_EDGES_PER_BUFFER` | 8192 | Buffer swap threshold |
 | `TIC_STATS_PERIOD_MS` | 1000 | Max time between stats (ms) |
 | `TIC_PWM_OUTPUT_ENABLE` | off | Generate PWM on separate pin |
@@ -124,6 +125,12 @@ typedef struct {
     double min_ns, max_ns, mean_ns, stddev_ns;
 } tic_delay_stat_t;
 ```
+
+## TODO
+
+- [ ] Compact event struct (currently 8 bytes/event, could be 5 with packed channel+type)
+- [ ] USB CDC streaming for raw edge data
+- [ ] InfluxDB/MQTT integration
 
 ## License
 

@@ -2,17 +2,17 @@
 #include "driver/mcpwm_cap.h"
 #include "esp_log.h"
 #include "esp_attr.h"
+#include "sdkconfig.h"
 #include <string.h>
 
 static const char *TAG = "tic_capture";
 
-// Buffer configuration - will be set at init
-#define MAX_BUFFER_SIZE 8192  // Maximum events per buffer
-static size_t s_edges_per_buffer = 1000;  // Default, configurable
+// Buffer configuration from Kconfig
+static size_t s_edges_per_buffer = CONFIG_TIC_EDGES_PER_BUFFER;
 
 // Double buffer (shared by both channels, events interleaved)
-static tic_event_t s_buffer_a[MAX_BUFFER_SIZE];
-static tic_event_t s_buffer_b[MAX_BUFFER_SIZE];
+static tic_event_t s_buffer_a[CONFIG_TIC_MAX_BUFFER_SIZE];
+static tic_event_t s_buffer_b[CONFIG_TIC_MAX_BUFFER_SIZE];
 static tic_event_t *s_active_buffer = s_buffer_a;
 static tic_event_t *s_ready_buffer = s_buffer_b;
 static volatile size_t s_active_count = 0;
@@ -51,7 +51,7 @@ static bool IRAM_ATTR capture_callback(mcpwm_cap_channel_handle_t cap_chan,
     size_t count = s_active_count;
 
     // Store edge event
-    if (count < MAX_BUFFER_SIZE) {
+    if (count < CONFIG_TIC_MAX_BUFFER_SIZE) {
         tic_event_t *event = &s_active_buffer[count];
         event->type = TIC_EVENT_EDGE;
         event->channel = channel;
@@ -99,8 +99,8 @@ esp_err_t tic_capture_init(int gpio_a, int gpio_b, bool loopback, size_t edges_p
              gpio_a, gpio_b, loopback, edges_per_buffer);
 
     // Validate and set edges per buffer
-    if (edges_per_buffer == 0 || edges_per_buffer > MAX_BUFFER_SIZE) {
-        ESP_LOGE(TAG, "Invalid edges_per_buffer: %zu (max: %d)", edges_per_buffer, MAX_BUFFER_SIZE);
+    if (edges_per_buffer == 0 || edges_per_buffer > CONFIG_TIC_MAX_BUFFER_SIZE) {
+        ESP_LOGE(TAG, "Invalid edges_per_buffer: %zu (max: %d)", edges_per_buffer, CONFIG_TIC_MAX_BUFFER_SIZE);
         return ESP_ERR_INVALID_ARG;
     }
     s_edges_per_buffer = edges_per_buffer;

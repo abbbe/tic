@@ -65,10 +65,19 @@ menu "TIC Configuration"
 
     endmenu
 
-    config TIC_EDGES_PER_BUFFER
-        int "Edges per buffer"
+    config TIC_MAX_BUFFER_SIZE
+        int "Maximum buffer size (events)"
         default 8192
-        range 1 8192
+        range 256 32768
+        help
+            Maximum number of events each buffer can hold.
+            Two buffers are allocated (double buffering).
+            Memory usage: 2 * MAX_BUFFER_SIZE * 8 bytes.
+
+    config TIC_EDGES_PER_BUFFER
+        int "Edges per buffer (swap threshold)"
+        default 8192
+        range 1 TIC_MAX_BUFFER_SIZE
         help
             Number of edge events to capture before swapping buffers.
             Lower values give more frequent statistics updates at high frequencies.
