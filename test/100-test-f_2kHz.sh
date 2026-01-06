@@ -39,6 +39,7 @@ fi
 source "$IDF_PATH/export.sh"
 
 PORT="$TIC1_SERIAL_PORT"
+BUILD_DIR="build_test"
 
 echo "=== TIC Test: 2kHz loopback with zero delay ==="
 echo "Project: $PROJECT_DIR"
@@ -47,9 +48,8 @@ echo ""
 
 cd "$PROJECT_DIR"
 
-# Build with test configuration
-echo "=== Building with test configuration ==="
-cat > sdkconfig.defaults.test << 'EOF'
+# Create test config
+cat > sdkconfig.test << 'EOF'
 # Loopback mode: gen GPIO = capture GPIO
 CONFIG_TIC_INPUT_GPIO_A=4
 CONFIG_TIC_INPUT_GPIO_B=5
@@ -61,20 +61,20 @@ CONFIG_TIC_SIGGEN_B_DELAY_NS=0
 CONFIG_TIC_OUTPUT_CSV=y
 EOF
 
-# Clean and build with test config
-rm -f sdkconfig
-cp sdkconfig.defaults.test sdkconfig.defaults
-idf.py fullclean > /dev/null 2>&1 || true
-idf.py set-target esp32s3
-idf.py build
+# Build with test config
+echo "=== Building with test configuration ==="
+idf.py -B "$BUILD_DIR" \
+    -DIDF_TARGET=esp32s3 \
+    -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.test" \
+    build
 
 echo ""
 echo "=== Flashing ==="
-idf.py -p "$PORT" flash
+idf.py -B "$BUILD_DIR" -p "$PORT" flash
 
 echo ""
 echo "=== Running validation ==="
-python3 "$SCRIPT_DIR/tic_reader.py" \
+"$SCRIPT_DIR/.venv/bin/python3" "$SCRIPT_DIR/tic_reader.py" \
     --port "$PORT" \
     --duration 10 \
     --expected-freq-a 2000 \
@@ -84,7 +84,7 @@ python3 "$SCRIPT_DIR/tic_reader.py" \
     --delay-tolerance 12.5
 
 # Cleanup
-rm -f sdkconfig.defaults.test
+rm -f sdkconfig.test
 
 echo ""
 echo "=== Test complete ==="

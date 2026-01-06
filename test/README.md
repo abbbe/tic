@@ -111,3 +111,13 @@ PASS: All values within tolerance
 **Exit codes:**
 - 0: PASS - all values within tolerance
 - 1: FAIL - one or more values out of tolerance
+
+
+### 12o0-xxx
+
+  1.4 ← 2.6    D2 Gen A → D1 Cap A     RED
+  1.5 ← 3.6    D3 Gen A → D1 Cap B     GREY
+  1.6 → 2.4    D1 Gen A → D2 Cap A     PURPLE
+  1.7 → 3.4    D1 Gen B → D3 Cap A     BLUE
+  2.7 → 3.5    D2 Gen B → D3 Cap B     GREEN
+  3.7 → 2.5    D3 Gen B → D2 Cap B     YELLOW

@@ -100,7 +100,7 @@ for i in $(seq 1 $NUM_TESTS); do
     echo "=== Test $i/$NUM_TESTS: freq=${FREQ}Hz delay=${DELAY}ns ==="
 
     # Create test config
-    cat > sdkconfig.defaults.test << EOF
+    cat > "$PROJECT_DIR/sdkconfig.test" << EOF
 CONFIG_TIC_INPUT_GPIO_A=4
 CONFIG_TIC_INPUT_GPIO_B=5
 CONFIG_TIC_SIGGEN_A_GPIO=4
@@ -111,12 +111,12 @@ CONFIG_TIC_SIGGEN_B_DELAY_NS=$DELAY
 CONFIG_TIC_OUTPUT_CSV=y
 EOF
 
-    rm -f sdkconfig
-    cp sdkconfig.defaults.test sdkconfig.defaults
-
     # Build
     echo "  Building..."
-    if ! idf.py build > "$LOG_DIR/build_$(printf '%03d' $i).log" 2>&1; then
+    if ! idf.py -B build_test \
+        -DIDF_TARGET=esp32s3 \
+        -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.test" \
+        build > "$LOG_DIR/build_$(printf '%03d' $i).log" 2>&1; then
         echo "  FAIL: Build failed"
         echo "$i,FAIL,BUILD,$FREQ,$DELAY,,,," >> "$RESULTS_CSV"
         ((FAIL++)) || true
@@ -125,7 +125,7 @@ EOF
 
     # Flash
     echo "  Flashing..."
-    if ! idf.py -p "$PORT" flash > "$LOG_DIR/flash_$(printf '%03d' $i).log" 2>&1; then
+    if ! idf.py -B build_test -p "$PORT" flash > "$LOG_DIR/flash_$(printf '%03d' $i).log" 2>&1; then
         echo "  FAIL: Flash failed"
         echo "$i,FAIL,FLASH,$FREQ,$DELAY,,,," >> "$RESULTS_CSV"
         ((FAIL++)) || true
@@ -175,7 +175,7 @@ EOF
 done
 
 # Cleanup
-rm -f sdkconfig.defaults.test
+rm -f "$PROJECT_DIR/sdkconfig.test"
 
 # End time
 END_TIME=$(date +%s)

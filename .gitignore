@@ -1,10 +1,13 @@
 # Build output
 build/
+build_*/
 
 # Generated config (keep sdkconfig.defaults, ignore generated sdkconfig)
 sdkconfig
 sdkconfig.old
 sdkconfig.defaults.*
+sdkconfig.multi
+sdkconfig.test
 
 # IDE
 .vscode/
@@ -18,3 +21,4 @@ sdkconfig.defaults.*
 
 # Test logs
 test/logs/
+sdkconfig.defaults

@@ -1,0 +1,298 @@
+#!/bin/bash
+#
+# TIC test build/flash/monitor helper
+#
+# Usage:
+#   ./test/bin/idf [actions...] [options...] [targets...]
+#
+# Actions:
+#   clean    - Clean build directory
+#   build    - Build firmware
+#   flash    - Flash to device(s)
+#   monitor  - Monitor serial output
+#
+# Options:
+#   -f, --freq HZ       - Signal generator frequency (default: 2000)
+#   -d, --delay NS      - Channel B delay in ns (default: 0)
+#   -m, --mode MODE     - Build mode: loopback or multi (default: loopback)
+#   --no-reset          - Don't reset on monitor
+#
+# Targets:
+#   tic1, tic2, tic3    - Individual devices
+#   all                 - All devices (default for multi mode, tic1 for loopback)
+#
+# Examples:
+#   ./test/bin/idf build flash tic1           # Build loopback, flash to TIC1
+#   ./test/bin/idf -m multi build flash all   # Build multi, flash all devices
+#   ./test/bin/idf -f 5000 -d 100 build       # Build with 5kHz, 100ns delay
+#   ./test/bin/idf flash monitor tic1         # Flash and monitor TIC1
+#
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TEST_DIR="$(dirname "$SCRIPT_DIR")"
+PROJECT_DIR="$(dirname "$TEST_DIR")"
+
+# Load .env
+if [[ ! -f "$TEST_DIR/.env" ]]; then
+    echo "ERROR: $TEST_DIR/.env not found. Copy .env.sample and configure." >&2
+    exit 1
+fi
+source "$TEST_DIR/.env"
+
+# Expand $HOME in IDF_PATH
+eval IDF_PATH="$IDF_PATH"
+
+# Defaults for build directories
+BUILDDIR_LOOPBACK="${BUILDDIR_LOOPBACK:-build_loopback}"
+BUILDDIR_MULTI="${BUILDDIR_MULTI:-build_multi}"
+
+# Target chip
+IDF_TARGET=esp32s3
+
+# ESP-IDF export script
+ESP_IDF_EXPORT="$IDF_PATH/export.sh"
+if [[ ! -f "$ESP_IDF_EXPORT" ]]; then
+    echo "ERROR: $ESP_IDF_EXPORT not found" >&2
+    exit 1
+fi
+
+# Defaults
+DO_CLEAN=false
+DO_BUILD=false
+DO_FLASH=false
+DO_MONITOR=false
+NO_RESET=false
+MODE="loopback"
+FREQ_HZ=2000
+DELAY_NS=0
+TARGETS=()
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        clean)
+            DO_CLEAN=true
+            shift
+            ;;
+        build)
+            DO_BUILD=true
+            shift
+            ;;
+        flash)
+            DO_FLASH=true
+            shift
+            ;;
+        monitor)
+            DO_MONITOR=true
+            shift
+            ;;
+        -f|--freq)
+            FREQ_HZ="$2"
+            shift 2
+            ;;
+        -d|--delay)
+            DELAY_NS="$2"
+            shift 2
+            ;;
+        -m|--mode)
+            MODE="$2"
+            shift 2
+            ;;
+        --no-reset)
+            NO_RESET=true
+            shift
+            ;;
+        tic1|tic2|tic3|all)
+            TARGETS+=("$1")
+            shift
+            ;;
+        -h|--help)
+            sed -n '2,28p' "$0" | sed 's/^#//' | sed 's/^ //'
+            exit 0
+            ;;
+        *)
+            echo "Unknown argument: $1"
+            echo "Use --help for usage"
+            exit 1
+            ;;
+    esac
+done
+
+# Default action is build
+if [[ "$DO_CLEAN" == false && "$DO_BUILD" == false && "$DO_FLASH" == false && "$DO_MONITOR" == false ]]; then
+    DO_BUILD=true
+fi
+
+# Default targets based on mode
+if [[ ${#TARGETS[@]} -eq 0 ]]; then
+    if [[ "$MODE" == "multi" ]]; then
+        TARGETS=("all")
+    else
+        TARGETS=("tic1")
+    fi
+fi
+
+# Expand 'all' target
+expand_targets() {
+    local expanded=()
+    for t in "${TARGETS[@]}"; do
+        if [[ "$t" == "all" ]]; then
+            expanded+=("tic1" "tic2" "tic3")
+        else
+            expanded+=("$t")
+        fi
+    done
+    echo "${expanded[@]}"
+}
+
+# Get serial port for a target
+get_port() {
+    local target="$1"
+    case "$target" in
+        tic1) echo "$TIC1_SERIAL_PORT" ;;
+        tic2) echo "$TIC2_SERIAL_PORT" ;;
+        tic3) echo "$TIC3_SERIAL_PORT" ;;
+    esac
+}
+
+# Get build directory based on mode
+get_build_dir() {
+    case "$MODE" in
+        loopback) echo "$BUILDDIR_LOOPBACK" ;;
+        multi)    echo "$BUILDDIR_MULTI" ;;
+        *)        echo "build_$MODE" ;;
+    esac
+}
+
+# Generate sdkconfig content
+generate_sdkconfig() {
+    local mode="$1"
+
+    if [[ "$mode" == "loopback" ]]; then
+        # Loopback: gen GPIO = capture GPIO
+        cat << EOF
+# Loopback mode configuration
+CONFIG_TIC_INPUT_GPIO_A=4
+CONFIG_TIC_INPUT_GPIO_B=5
+CONFIG_TIC_SIGGEN_A_GPIO=4
+CONFIG_TIC_SIGGEN_B_GPIO=5
+CONFIG_TIC_SIGGEN_A_FREQ_HZ=$FREQ_HZ
+CONFIG_TIC_SIGGEN_B_FREQ_HZ=$FREQ_HZ
+CONFIG_TIC_SIGGEN_B_DELAY_NS=$DELAY_NS
+CONFIG_TIC_OUTPUT_CSV=y
+EOF
+    else
+        # Multi-device: separate gen and capture GPIOs
+        cat << EOF
+# Multi-device mode configuration
+CONFIG_TIC_INPUT_GPIO_A=4
+CONFIG_TIC_INPUT_GPIO_B=5
+CONFIG_TIC_SIGGEN_A_GPIO=6
+CONFIG_TIC_SIGGEN_B_GPIO=7
+CONFIG_TIC_SIGGEN_A_FREQ_HZ=$FREQ_HZ
+CONFIG_TIC_SIGGEN_B_FREQ_HZ=$FREQ_HZ
+CONFIG_TIC_SIGGEN_B_DELAY_NS=$DELAY_NS
+CONFIG_TIC_OUTPUT_CSV=y
+EOF
+    fi
+}
+
+cd "$PROJECT_DIR"
+
+# Source ESP-IDF
+source "$ESP_IDF_EXPORT" > /dev/null 2>&1
+
+BUILD_DIR=$(get_build_dir)
+SDKCONFIG_FILE="sdkconfig.$MODE"
+
+echo "=== TIC Build Helper ==="
+echo "Mode: $MODE"
+echo "Build dir: $BUILD_DIR"
+echo "Frequency: $FREQ_HZ Hz"
+echo "Delay: $DELAY_NS ns"
+echo "Targets: ${TARGETS[*]}"
+echo ""
+
+# Generate sdkconfig
+generate_sdkconfig "$MODE" > "$SDKCONFIG_FILE"
+
+# Clean
+if [[ "$DO_CLEAN" == true ]]; then
+    echo "=== Cleaning $BUILD_DIR ==="
+    idf.py -B "$BUILD_DIR" fullclean || true
+    echo ""
+fi
+
+# Build
+if [[ "$DO_BUILD" == true ]]; then
+    echo "=== Building ==="
+    idf.py -B "$BUILD_DIR" \
+        -DIDF_TARGET="$IDF_TARGET" \
+        -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;$SDKCONFIG_FILE" \
+        build
+    echo ""
+fi
+
+# Flash
+if [[ "$DO_FLASH" == true ]]; then
+    echo "=== Flashing ==="
+    for target in $(expand_targets); do
+        port=$(get_port "$target")
+        if [[ -z "$port" ]]; then
+            echo "ERROR: No port configured for $target"
+            continue
+        fi
+        echo "Flashing $target ($port)..."
+        idf.py -B "$BUILD_DIR" -p "$port" flash
+    done
+    echo ""
+fi
+
+# Monitor
+if [[ "$DO_MONITOR" == true ]]; then
+    targets_array=($(expand_targets))
+
+    MONITOR_ARGS=""
+    [[ "$NO_RESET" == true ]] && MONITOR_ARGS="--no-reset"
+
+    if [[ ${#targets_array[@]} -eq 1 ]]; then
+        # Single monitor
+        target="${targets_array[0]}"
+        port=$(get_port "$target")
+        echo "=== Monitoring $target ($port) ==="
+        idf.py -B "$BUILD_DIR" -p "$port" monitor $MONITOR_ARGS
+    else
+        # Multiple monitors with tmux
+        echo "=== Opening ${#targets_array[@]} monitors in tmux ==="
+        tmux kill-session -t tic_monitor 2>/dev/null || true
+        tmux new-session -d -s tic_monitor -x 200 -y 50
+
+        FIRST_PANE=true
+        for target in "${targets_array[@]}"; do
+            port=$(get_port "$target")
+            if [[ -z "$port" ]]; then
+                continue
+            fi
+
+            if $FIRST_PANE; then
+                FIRST_PANE=false
+            else
+                tmux split-window -t tic_monitor -v
+            fi
+
+            tmux send-keys -t tic_monitor \
+                "cd '$PROJECT_DIR' && source '$ESP_IDF_EXPORT' > /dev/null 2>&1 && idf.py -B '$BUILD_DIR' -p '$port' monitor $MONITOR_ARGS" C-m
+        done
+
+        tmux select-layout -t tic_monitor even-vertical
+        tmux select-pane -t tic_monitor:0.0
+        tmux attach-session -t tic_monitor
+    fi
+fi
+
+# Cleanup generated sdkconfig (keep it for reference during development)
+# rm -f "$SDKCONFIG_FILE"
+
+echo "Done!"
