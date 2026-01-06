@@ -6,6 +6,9 @@
 
 static const char *TAG = "tic_stats";
 
+// Row counter for header repeat
+static uint32_t s_row_count = 0;
+
 // Helper to initialize channel stats
 static void init_channel_stats(tic_channel_stat_t *stats)
 {
@@ -347,10 +350,49 @@ void tic_stats_print_delay(const tic_delay_stat_t *stats)
     }
 }
 
+static void print_header(void)
+{
+    ESP_LOGI(TAG, "A_N  |   A_Hz|A_min_us|A_avg_us|A_max_us|A_std_us|"
+                  "B_N  |   B_Hz|B_min_us|B_avg_us|B_max_us|B_std_us|"
+                  "D_N  |D_min_ns|D_avg_ns|D_max_ns|D_std_ns|D_missA|D_missB");
+    ESP_LOGI(TAG, "-----|-------|--------|--------|--------|--------|"
+                  "-----|-------|--------|--------|--------|--------|"
+                  "-----|--------|--------|--------|--------|-------|-------");
+}
+
 void tic_stats_print(const tic_stats_t *stats)
 {
-    ESP_LOGI(TAG, "=== TIC Statistics ===");
-    tic_stats_print_channel(&stats->ch_a, "A");
-    tic_stats_print_channel(&stats->ch_b, "B");
-    tic_stats_print_delay(&stats->delay);
+    // Print header every 24 rows
+    if (s_row_count % 24 == 0) {
+        print_header();
+    }
+    s_row_count++;
+
+    // Channel A values
+    double a_hz = (stats->ch_a.mean_ns > 0) ? 1e9 / stats->ch_a.mean_ns : 0.0;
+    double a_min = stats->ch_a.min_ns / 1000.0;
+    double a_avg = stats->ch_a.mean_ns / 1000.0;
+    double a_max = stats->ch_a.max_ns / 1000.0;
+    double a_std = stats->ch_a.stddev_ns / 1000.0;
+
+    // Channel B values
+    double b_hz = (stats->ch_b.mean_ns > 0) ? 1e9 / stats->ch_b.mean_ns : 0.0;
+    double b_min = stats->ch_b.min_ns / 1000.0;
+    double b_avg = stats->ch_b.mean_ns / 1000.0;
+    double b_max = stats->ch_b.max_ns / 1000.0;
+    double b_std = stats->ch_b.stddev_ns / 1000.0;
+
+    // Delay values (already in ns)
+    double d_min = stats->delay.min_ns;
+    double d_avg = stats->delay.mean_ns;
+    double d_max = stats->delay.max_ns;
+    double d_std = stats->delay.stddev_ns;
+
+    ESP_LOGI(TAG, "%5lu|%7.2f|%8.3f|%8.3f|%8.3f|%8.3f|"
+                  "%5lu|%7.2f|%8.3f|%8.3f|%8.3f|%8.3f|"
+                  "%5lu|%8.3f|%8.3f|%8.3f|%8.3f|%7lu|%7lu",
+             (unsigned long)stats->ch_a.edge_count, a_hz, a_min, a_avg, a_max, a_std,
+             (unsigned long)stats->ch_b.edge_count, b_hz, b_min, b_avg, b_max, b_std,
+             (unsigned long)stats->delay.count, d_min, d_avg, d_max, d_std,
+             (unsigned long)stats->delay.missed_a, (unsigned long)stats->delay.missed_b);
 }

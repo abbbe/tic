@@ -43,23 +43,12 @@ idf.py build flash monitor
 
 ## Output
 
-```
-=== TIC Statistics ===
-Ch A: 4096 edges, 1000.000 Hz, period [999.988..1000.012..1000.037] us, std=0.008 us
-Ch B: 4096 edges, 1000.000 Hz, period [999.991..1000.011..1000.031] us, std=0.007 us
-Delay B-A: 4095 pairs, mean=50.125 ns, std=2.341 ns, [45.000..55.250]
-```
+Single row per buffer, header repeats every 24 rows:
 
-Statistics per channel:
-- Edge count, frequency (Hz)
-- Period: [min..mean..max] in microseconds
-- Standard deviation
-
-Delay statistics (B - A):
-- Matched pairs count
-- Mean delay with stddev
-- Min/max range
-- Missed pulses (unmatched edges)
+| Prefix | Columns |
+|--------|---------|
+| `A_`, `B_` | N, Hz, min_us, avg_us, max_us, std_us |
+| `D_` | N, min_ns, avg_ns, max_ns, std_ns, missA, missB |
 
 ## Architecture
 
