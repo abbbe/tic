@@ -144,8 +144,8 @@ esp_err_t tic_siggen_init_b(int gpio, uint32_t freq_hz, int32_t delay_ns, bool l
     uint32_t period_ticks = TIMER_RESOLUTION_HZ / freq_hz;
 
     // For B to LAG A by delay_ticks, B's phase must be (period - delay_ticks)
-    // Because: if B.count > A.count, B reaches 0 (rising edge) BEFORE A
-    int32_t phase_ticks = (-(int32_t)s_delay_ticks) % (int32_t)period_ticks;
+    // Add 1 to compensate for sync propagation latency (sync loads B one cycle after A fires)
+    int32_t phase_ticks = (-(int32_t)s_delay_ticks + 1) % (int32_t)period_ticks;
     if (phase_ticks < 0) {
         phase_ticks += period_ticks;
     }
