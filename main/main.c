@@ -97,19 +97,20 @@ void app_main(void)
         return;
     }
 
-    // Start signal generators
+    // Start capture FIRST (must be ready before first edge)
+    ret = tic_capture_start();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to start capture");
+        return;
+    }
+
+    // Then start signal generators
     if (CONFIG_TIC_SIGGEN_A_FREQ_HZ > 0 || CONFIG_TIC_SIGGEN_B_FREQ_HZ > 0) {
         ret = tic_siggen_start();
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "Failed to start signal generators");
             return;
         }
-    }
-
-    ret = tic_capture_start();
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to start capture");
-        return;
     }
 
     // Start one-shot timer (will be reset after each buffer is processed)
