@@ -13,9 +13,11 @@
 #
 # Options:
 #   -f, --freq HZ       - Signal generator frequency (default: 2000)
+#   --freq-b HZ         - Generator B frequency (default: same as --freq)
 #   -d, --delay NS      - Channel B delay in ns (default: 0)
 #   -m, --mode MODE     - Build mode: loopback or normal (default: normal)
 #   -b, --build-dir DIR - Custom build directory (default: build/<mode>)
+#   --csv               - Enable CSV output format
 #   --no-reset          - Don't reset on monitor
 #
 # Targets:
@@ -61,8 +63,10 @@ DO_BUILD=false
 DO_FLASH=false
 DO_MONITOR=false
 NO_RESET=false
+CSV_OUTPUT=false
 MODE="normal"
 FREQ_HZ=2000
+FREQ_B_HZ=""
 DELAY_NS=0
 CUSTOM_BUILD_DIR=""
 TARGETS=()
@@ -90,6 +94,10 @@ while [[ $# -gt 0 ]]; do
             FREQ_HZ="$2"
             shift 2
             ;;
+        --freq-b)
+            FREQ_B_HZ="$2"
+            shift 2
+            ;;
         -d|--delay)
             DELAY_NS="$2"
             shift 2
@@ -100,6 +108,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --no-reset)
             NO_RESET=true
+            shift
+            ;;
+        --csv)
+            CSV_OUTPUT=true
             shift
             ;;
         -b|--build-dir)
@@ -159,6 +171,7 @@ get_port() {
 # Generate sdkconfig content
 generate_sdkconfig() {
     local mode="$1"
+    local freq_b="${FREQ_B_HZ:-$FREQ_HZ}"
 
     if [[ "$mode" == "loopback" ]]; then
         # Loopback: gen GPIO = capture GPIO
@@ -169,9 +182,8 @@ CONFIG_TIC_INPUT_GPIO_B=5
 CONFIG_TIC_SIGGEN_A_GPIO=4
 CONFIG_TIC_SIGGEN_B_GPIO=5
 CONFIG_TIC_SIGGEN_A_FREQ_HZ=$FREQ_HZ
-CONFIG_TIC_SIGGEN_B_FREQ_HZ=$FREQ_HZ
+CONFIG_TIC_SIGGEN_B_FREQ_HZ=$freq_b
 CONFIG_TIC_SIGGEN_B_DELAY_NS=$DELAY_NS
-CONFIG_TIC_OUTPUT_CSV=y
 EOF
     else
         # Normal: separate gen and capture GPIOs (for external wiring)
@@ -182,10 +194,14 @@ CONFIG_TIC_INPUT_GPIO_B=5
 CONFIG_TIC_SIGGEN_A_GPIO=6
 CONFIG_TIC_SIGGEN_B_GPIO=7
 CONFIG_TIC_SIGGEN_A_FREQ_HZ=$FREQ_HZ
-CONFIG_TIC_SIGGEN_B_FREQ_HZ=$FREQ_HZ
+CONFIG_TIC_SIGGEN_B_FREQ_HZ=$freq_b
 CONFIG_TIC_SIGGEN_B_DELAY_NS=$DELAY_NS
-CONFIG_TIC_OUTPUT_CSV=y
 EOF
+    fi
+
+    # CSV output (optional)
+    if [[ "$CSV_OUTPUT" == true ]]; then
+        echo "CONFIG_TIC_OUTPUT_CSV=y"
     fi
 }
 
@@ -205,7 +221,12 @@ SDKCONFIG_FILE="$BUILD_DIR/sdkconfig.$MODE"
 echo "=== TIC Build Helper ==="
 echo "Mode: $MODE"
 echo "Build dir: $BUILD_DIR"
-echo "Frequency: $FREQ_HZ Hz"
+if [[ -n "$FREQ_B_HZ" ]]; then
+    echo "Frequency A: $FREQ_HZ Hz"
+    echo "Frequency B: $FREQ_B_HZ Hz"
+else
+    echo "Frequency: $FREQ_HZ Hz"
+fi
 echo "Delay B-A: $DELAY_NS ns"
 echo "Targets: ${TARGETS[*]}"
 echo ""
@@ -236,6 +257,13 @@ if [[ "$DO_BUILD" == true ]]; then
         echo "Config changed, forcing rebuild..."
         echo "$NEW_SDKCONFIG" > "$SDKCONFIG_FILE"
         # Remove sdkconfig and cmake cache to force full regeneration
+        rm -f "$BUILD_DIR/sdkconfig"
+        rm -f "$BUILD_DIR/CMakeCache.txt"
+    fi
+
+    # Also check if sdkconfig.defaults is newer than build sdkconfig
+    if [[ -f "$BUILD_DIR/sdkconfig" && "sdkconfig.defaults" -nt "$BUILD_DIR/sdkconfig" ]]; then
+        echo "sdkconfig.defaults changed, forcing rebuild..."
         rm -f "$BUILD_DIR/sdkconfig"
         rm -f "$BUILD_DIR/CMakeCache.txt"
     fi

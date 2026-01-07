@@ -1,7 +1,5 @@
 # Build output
 build/
-sdkconfig
-sdkconfig.old
 
 # IDE
 .vscode/
