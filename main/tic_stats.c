@@ -274,19 +274,20 @@ static void print_header(void)
 #if CONFIG_TIC_OUTPUT_CSV
     printf("CSV%lu\tA_N,A_Hz,A_min_us,A_avg_us,A_max_us,A_std_us,"
            "B_N,B_Hz,B_min_us,B_avg_us,B_max_us,B_std_us,"
-           "D_N,D_min_ns,D_avg_ns,D_max_ns,D_std_ns,D_missA,D_missB\n",
+           "D_N,D_min_ns,D_avg_ns,D_max_ns,D_std_ns,D_missA,D_missB,"
+           "CPU0,CPU1\n",
            (unsigned long)s_row_count);
 #else
     ESP_LOGI(TAG, "A_N  |   A_Hz|A_min_us|A_avg_us|A_max_us|A_std_us|"
                   "B_N  |   B_Hz|B_min_us|B_avg_us|B_max_us|B_std_us|"
-                  "D_N  |D_min_ns|D_avg_ns|D_max_ns|D_std_ns|D_missA|D_missB");
+                  "D_N  |D_min_ns|D_avg_ns|D_max_ns|D_std_ns|D_missA|D_missB|CPU0|CPU1");
     ESP_LOGI(TAG, "-----|-------|--------|--------|--------|--------|"
                   "-----|-------|--------|--------|--------|--------|"
-                  "-----|--------|--------|--------|--------|-------|-------");
+                  "-----|--------|--------|--------|--------|-------|-------|----|----|");
 #endif
 }
 
-void tic_stats_print(const tic_stats_t *stats)
+void tic_stats_print(const tic_stats_t *stats, const tic_cpu_stats_t *cpu_stats)
 {
     // Print header: once for CSV, every 24 rows for table
 #if CONFIG_TIC_OUTPUT_CSV
@@ -320,22 +321,29 @@ void tic_stats_print(const tic_stats_t *stats)
     double d_max = stats->delay.max_ns;
     double d_std = stats->delay.stddev_ns;
 
+    // CPU utilization values (default to 0 if not provided)
+    float cpu0 = cpu_stats ? cpu_stats->util_pct_cpu0 : 0.0f;
+    float cpu1 = cpu_stats ? cpu_stats->util_pct_cpu1 : 0.0f;
+
 #if CONFIG_TIC_OUTPUT_CSV
     printf("CSV%lu\t%lu,%.2f,%.3f,%.3f,%.3f,%.3f,"
            "%lu,%.2f,%.3f,%.3f,%.3f,%.3f,"
-           "%lu,%.3f,%.3f,%.3f,%.3f,%lu,%lu\n",
+           "%lu,%.3f,%.3f,%.3f,%.3f,%lu,%lu,"
+           "%.1f,%.1f\n",
            (unsigned long)s_row_count,
            (unsigned long)stats->ch_a.edge_count, a_hz, a_min, a_avg, a_max, a_std,
            (unsigned long)stats->ch_b.edge_count, b_hz, b_min, b_avg, b_max, b_std,
            (unsigned long)stats->delay.count, d_min, d_avg, d_max, d_std,
-           (unsigned long)stats->delay.missed_a, (unsigned long)stats->delay.missed_b);
+           (unsigned long)stats->delay.missed_a, (unsigned long)stats->delay.missed_b,
+           cpu0, cpu1);
 #else
     ESP_LOGI(TAG, "%5lu|%7.2f|%8.3f|%8.3f|%8.3f|%8.3f|"
                   "%5lu|%7.2f|%8.3f|%8.3f|%8.3f|%8.3f|"
-                  "%5lu|%8.3f|%8.3f|%8.3f|%8.3f|%7lu|%7lu",
+                  "%5lu|%8.3f|%8.3f|%8.3f|%8.3f|%7lu|%7lu|%4.0f|%4.0f",
              (unsigned long)stats->ch_a.edge_count, a_hz, a_min, a_avg, a_max, a_std,
              (unsigned long)stats->ch_b.edge_count, b_hz, b_min, b_avg, b_max, b_std,
              (unsigned long)stats->delay.count, d_min, d_avg, d_max, d_std,
-             (unsigned long)stats->delay.missed_a, (unsigned long)stats->delay.missed_b);
+             (unsigned long)stats->delay.missed_a, (unsigned long)stats->delay.missed_b,
+             cpu0, cpu1);
 #endif
 }

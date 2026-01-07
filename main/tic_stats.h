@@ -1,6 +1,7 @@
 #pragma once
 
 #include "tic_capture.h"
+#include "tic_cpu.h"
 #include <stdint.h>
 #include <stddef.h>
 
@@ -63,5 +64,6 @@ void tic_stats_print_delay(const tic_delay_stat_t *stats);
  * @brief Print statistics for both channels to console
  *
  * @param stats Statistics to print
+ * @param cpu_stats CPU idle statistics (can be NULL)
  */
-void tic_stats_print(const tic_stats_t *stats);
+void tic_stats_print(const tic_stats_t *stats, const tic_cpu_stats_t *cpu_stats);

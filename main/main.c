@@ -7,6 +7,7 @@
 #include "sdkconfig.h"
 
 #include "tic_capture.h"
+#include "tic_cpu.h"
 #include "tic_stats.h"
 #include "tic_matcher.h"
 #include "tic_test.h"
@@ -34,6 +35,9 @@ void app_main(void)
     esp_err_t ret;
 
     ESP_LOGI(TAG, "=== Time Interval Counter (TIC) ===");
+
+    // Initialize CPU idle time measurement
+    tic_cpu_init();
 
     // Determine loopback mode (auto-enable if gen GPIO == capture GPIO)
     bool loopback_a = (CONFIG_TIC_SIGGEN_A_GPIO == CONFIG_TIC_INPUT_GPIO_A);
@@ -183,7 +187,11 @@ void app_main(void)
             // Get delay stats from matcher and merge into stats
             tic_matcher_get_stats(&s_matcher, &stats.delay, true);
 
-            tic_stats_print(&stats);
+            // Get CPU idle stats
+            tic_cpu_stats_t cpu_stats;
+            tic_cpu_get_stats(&cpu_stats, true);
+
+            tic_stats_print(&stats, &cpu_stats);
         }
     }
 }

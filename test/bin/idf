@@ -19,8 +19,8 @@
 #   --no-reset          - Don't reset on monitor
 #
 # Targets:
-#   tic1, tic2, tic3    - Individual devices
-#   all                 - All devices
+#   tic1, tic2, tic3, tic4 - Individual devices
+#   all                    - All devices
 #
 # Examples:
 #   ./test/bin/idf build flash tic1           # Build normal, flash to TIC1
@@ -106,7 +106,7 @@ while [[ $# -gt 0 ]]; do
             CUSTOM_BUILD_DIR="$2"
             shift 2
             ;;
-        tic1|tic2|tic3|all)
+        tic1|tic2|tic3|tic4|all)
             TARGETS+=("$1")
             shift
             ;;
@@ -137,7 +137,7 @@ expand_targets() {
     local expanded=()
     for t in "${TARGETS[@]}"; do
         if [[ "$t" == "all" ]]; then
-            expanded+=("tic1" "tic2" "tic3")
+            expanded+=("tic1" "tic2" "tic3" "tic4")
         else
             expanded+=("$t")
         fi
@@ -152,6 +152,7 @@ get_port() {
         tic1) echo "$TIC1_SERIAL_PORT" ;;
         tic2) echo "$TIC2_SERIAL_PORT" ;;
         tic3) echo "$TIC3_SERIAL_PORT" ;;
+        tic4) echo "$TIC4_SERIAL_PORT" ;;
     esac
 }
 
