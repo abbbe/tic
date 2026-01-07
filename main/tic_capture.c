@@ -7,12 +7,9 @@
 
 static const char *TAG = "tic_capture";
 
-// Buffer configuration from Kconfig
-static size_t s_edges_per_buffer = CONFIG_TIC_EDGES_PER_BUFFER;
-
 // Double buffer (shared by both channels, events interleaved)
-static tic_event_t s_buffer_a[CONFIG_TIC_MAX_BUFFER_SIZE];
-static tic_event_t s_buffer_b[CONFIG_TIC_MAX_BUFFER_SIZE];
+static tic_event_t s_buffer_a[CONFIG_TIC_BUFFER_SIZE];
+static tic_event_t s_buffer_b[CONFIG_TIC_BUFFER_SIZE];
 static tic_event_t *s_active_buffer = s_buffer_a;
 static tic_event_t *s_ready_buffer = s_buffer_b;
 static volatile size_t s_active_count = 0;
@@ -56,7 +53,7 @@ static bool IRAM_ATTR capture_callback(mcpwm_cap_channel_handle_t cap_chan,
     size_t count = s_active_count;
 
     // Store edge event
-    if (count < CONFIG_TIC_MAX_BUFFER_SIZE) {
+    if (count < CONFIG_TIC_BUFFER_SIZE) {
         tic_event_t *event = &s_active_buffer[count];
         event->type = TIC_EVENT_EDGE;
         event->channel = channel;
@@ -66,7 +63,7 @@ static bool IRAM_ATTR capture_callback(mcpwm_cap_channel_handle_t cap_chan,
     }
 
     // Check if we've reached the threshold for buffer swap
-    if (s_active_count >= s_edges_per_buffer) {
+    if (s_active_count >= CONFIG_TIC_BUFFER_SIZE) {
         // Check for overrun: previous buffer wasn't fetched before this swap
         if (s_swap_pending) {
             s_overrun_flag = true;
@@ -102,19 +99,12 @@ static bool IRAM_ATTR capture_callback(mcpwm_cap_channel_handle_t cap_chan,
     return high_task_woken == pdTRUE;
 }
 
-esp_err_t tic_capture_init(int gpio_a, int gpio_b, size_t edges_per_buffer)
+esp_err_t tic_capture_init(int gpio_a, int gpio_b)
 {
     esp_err_t ret;
 
-    ESP_LOGI(TAG, "Initializing capture: GPIO_A=%d, GPIO_B=%d, edges=%zu",
-             gpio_a, gpio_b, edges_per_buffer);
-
-    // Validate and set edges per buffer
-    if (edges_per_buffer == 0 || edges_per_buffer > CONFIG_TIC_MAX_BUFFER_SIZE) {
-        ESP_LOGE(TAG, "Invalid edges_per_buffer: %zu (max: %d)", edges_per_buffer, CONFIG_TIC_MAX_BUFFER_SIZE);
-        return ESP_ERR_INVALID_ARG;
-    }
-    s_edges_per_buffer = edges_per_buffer;
+    ESP_LOGI(TAG, "Initializing capture: GPIO_A=%d, GPIO_B=%d, buffer=%d",
+             gpio_a, gpio_b, CONFIG_TIC_BUFFER_SIZE);
 
     // Create event group
     s_event_group = xEventGroupCreate();

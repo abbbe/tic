@@ -66,22 +66,15 @@ menu "TIC Configuration"
             internal signal generators are disabled.
             Set to 0 if using internal signal generators.
 
-    config TIC_MAX_BUFFER_SIZE
-        int "Maximum buffer size (events)"
-        default 8192
+    config TIC_BUFFER_SIZE
+        int "Buffer size (events)"
+        default 16384
         range 256 32768
         help
-            Maximum number of events each buffer can hold.
+            Number of events each buffer can hold.
             Two buffers are allocated (double buffering).
-            Memory usage: 2 * MAX_BUFFER_SIZE * 8 bytes.
-
-    config TIC_EDGES_PER_BUFFER
-        int "Edges per buffer (swap threshold)"
-        default 8192
-        range 1 TIC_MAX_BUFFER_SIZE
-        help
-            Number of edge events to capture before swapping buffers.
-            Lower values give more frequent statistics updates at high frequencies.
+            Memory usage: 2 * BUFFER_SIZE * 8 bytes.
+            Buffer swaps when full or when stats period expires.
 
     config TIC_STATS_PERIOD_MS
         int "Stats period (ms)"

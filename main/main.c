@@ -75,11 +75,10 @@ void app_main(void)
         loopback_b = false;
     }
 
-    ESP_LOGI(TAG, "Buffer: %d edges or %d ms", CONFIG_TIC_EDGES_PER_BUFFER, CONFIG_TIC_STATS_PERIOD_MS);
+    ESP_LOGI(TAG, "Buffer: %d edges or %d ms", CONFIG_TIC_BUFFER_SIZE, CONFIG_TIC_STATS_PERIOD_MS);
 
     // Initialize capture module
-    ret = tic_capture_init(CONFIG_TIC_INPUT_GPIO_A, CONFIG_TIC_INPUT_GPIO_B,
-                            CONFIG_TIC_EDGES_PER_BUFFER);
+    ret = tic_capture_init(CONFIG_TIC_INPUT_GPIO_A, CONFIG_TIC_INPUT_GPIO_B);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to initialize capture module");
         return;
