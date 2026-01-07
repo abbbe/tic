@@ -33,13 +33,18 @@ RESULTS_CSV_D2="$LOG_DIR/results_d2.csv"
 echo "test_num,status,freq_configured_hz,delay_configured_ns,freq_a_measured_hz,freq_b_measured_hz,delay_measured_ns" > "$RESULTS_CSV_D1"
 echo "test_num,status,freq_configured_hz,delay_configured_ns,freq_a_measured_hz,freq_b_measured_hz,delay_measured_ns" > "$RESULTS_CSV_D2"
 
-# Function to generate random number in range [min, max]
+# Function to generate random number in range [min, max] (uniform)
 rand_range() {
     local min=$1
     local max=$2
     local range=$((max - min + 1))
     local rand=$(od -An -tu4 -N4 /dev/urandom | tr -d ' ')
     echo $((min + rand % range))
+}
+
+# Function to generate random number with logarithmic distribution
+rand_log() {
+    "$SCRIPT_DIR/.venv/bin/python3" "$SCRIPT_DIR/rand_log.py" "$1" "$2" --int
 }
 
 echo "=== TIC Meta-Test (Dual Device) ==="
@@ -50,8 +55,8 @@ echo ""
 START_TIME=$(date +%s)
 
 for i in $(seq 1 $NUM_TESTS); do
-    # Generate random frequency
-    FREQ=$(rand_range $MIN_FREQ $MAX_FREQ)
+    # Generate random frequency (logarithmic distribution for even octave coverage)
+    FREQ=$(rand_log $MIN_FREQ $MAX_FREQ)
 
     # Calculate max safe delay (period/4, capped at 10000ns)
     PERIOD_NS=$((1000000000 / FREQ))
