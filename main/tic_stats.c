@@ -5,7 +5,6 @@
 #include "freertos/task.h"
 #include <math.h>
 #include <float.h>
-#include <stdlib.h>
 #include <stdio.h>
 
 static const char *TAG = "tic_stats";
@@ -107,8 +106,13 @@ void tic_stats_process(const tic_event_t *events, size_t event_count,
     // Track overflow count for extended timestamps (per channel)
     uint64_t overflow_count_a = 0, overflow_count_b = 0;
 
-    // === First pass: calculate period statistics for each channel ===
+    // Calculate period statistics for each channel
     for (size_t i = 0; i < event_count; i++) {
+        // Periodic yield to prevent task watchdog
+        if (i % 1000 == 0 && i > 0) {
+            taskYIELD();
+        }
+
         const tic_event_t *event = &events[i];
 
         if (event->type == TIC_EVENT_OVERFLOW) {
@@ -190,138 +194,9 @@ void tic_stats_process(const tic_event_t *events, size_t event_count,
     finalize_channel_stats(&stats->ch_a, mean_a, m2_a, n_a);
     finalize_channel_stats(&stats->ch_b, mean_b, m2_b, n_b);
 
-    // Yield to prevent task watchdog from triggering
-    taskYIELD();
-
-    // === Second pass: calculate relative delays between channels ===
-    // Use half the mean period as the matching window
-    double window_ns = 0.0;
-    if (stats->ch_a.mean_ns > 0 && stats->ch_b.mean_ns > 0) {
-        window_ns = (stats->ch_a.mean_ns + stats->ch_b.mean_ns) / 4.0;  // Quarter period window
-    } else if (stats->ch_a.mean_ns > 0) {
-        window_ns = stats->ch_a.mean_ns / 2.0;
-    } else if (stats->ch_b.mean_ns > 0) {
-        window_ns = stats->ch_b.mean_ns / 2.0;
-    } else {
-        // No period data, can't calculate delays
-        return;
-    }
-
-    // Welford's for delay
-    double mean_delay = 0.0, m2_delay = 0.0;
-    uint32_t n_delay = 0;
-
-    // Count events per channel
-    size_t a_count = 0, b_count = 0;
-    for (size_t i = 0; i < event_count; i++) {
-        if (events[i].type == TIC_EVENT_EDGE) {
-            if (events[i].channel == TIC_CHANNEL_A) a_count++;
-            else if (events[i].channel == TIC_CHANNEL_B) b_count++;
-        }
-    }
-
-    if (a_count == 0 || b_count == 0) {
-        // Can't calculate delays without both channels
-        stats->delay.missed_a = a_count;
-        stats->delay.missed_b = b_count;
-        // Zero out min/max (they're still at DBL_MAX/-DBL_MAX from init)
-        stats->delay.min_ns = 0.0;
-        stats->delay.max_ns = 0.0;
-        return;
-    }
-
-    // Calculate window in ticks for faster comparison
-    int64_t window_ticks = (int64_t)(window_ns / ns_per_tick);
-
-    // Allocate array to track which B edges have been matched (1:1 matching)
-    bool *b_matched = calloc(b_count, sizeof(bool));
-    if (!b_matched) {
-        ESP_LOGE(TAG, "Failed to allocate b_matched array");
-        return;
-    }
-
-    // Build index of B edge positions for efficient lookup
-    size_t *b_indices = malloc(b_count * sizeof(size_t));
-    if (!b_indices) {
-        free(b_matched);
-        ESP_LOGE(TAG, "Failed to allocate b_indices array");
-        return;
-    }
-    size_t b_idx = 0;
-    for (size_t i = 0; i < event_count && b_idx < b_count; i++) {
-        if (events[i].type == TIC_EVENT_EDGE && events[i].channel == TIC_CHANNEL_B) {
-            b_indices[b_idx++] = i;
-        }
-    }
-
-    // Linear O(n) algorithm: process events in order, match each A with nearest unmatched B
-    // Only advance search position when we actually match, so spurious edges don't skew subsequent matches
-    const size_t MAX_LOOKAHEAD = 10;  // Search up to 10 B edges ahead/behind
-
-    size_t last_matched_b = 0;  // Track last matched B index (not event position)
-
-    for (size_t i = 0; i < event_count; i++) {
-        // Periodic yield to prevent task watchdog
-        if (i % 500 == 0) {
-            taskYIELD();
-        }
-
-        const tic_event_t *evt_a = &events[i];
-
-        if (evt_a->type != TIC_EVENT_EDGE || evt_a->channel != TIC_CHANNEL_A) {
-            continue;
-        }
-
-        // Search for closest unmatched B within limited range around last match
-        int64_t best_delay_ticks = INT64_MAX;
-        size_t best_b_idx = SIZE_MAX;
-
-        size_t search_start = (last_matched_b > MAX_LOOKAHEAD) ? (last_matched_b - MAX_LOOKAHEAD) : 0;
-        size_t search_end = (last_matched_b + MAX_LOOKAHEAD + 1 < b_count) ? (last_matched_b + MAX_LOOKAHEAD + 1) : b_count;
-
-        for (size_t bi = search_start; bi < search_end; bi++) {
-            if (b_matched[bi]) continue;  // Skip already matched B edges
-
-            const tic_event_t *evt_b = &events[b_indices[bi]];
-
-            // Calculate delay (B - A) in ticks
-            int64_t delay_ticks = (int64_t)evt_b->value - (int64_t)evt_a->value;
-
-            // Check if within window (using ticks, not ns, for speed)
-            if (llabs(delay_ticks) < window_ticks) {
-                if (llabs(delay_ticks) < llabs(best_delay_ticks)) {
-                    best_delay_ticks = delay_ticks;
-                    best_b_idx = bi;
-                }
-            }
-        }
-
-        if (best_b_idx != SIZE_MAX) {
-            b_matched[best_b_idx] = true;  // Mark B as consumed
-            last_matched_b = best_b_idx;   // Advance search position only on match
-            double delay_ns = (double)best_delay_ticks * ns_per_tick;
-
-            // Update delay statistics using Welford's
-            n_delay++;
-            double delta = delay_ns - mean_delay;
-            mean_delay += delta / n_delay;
-            double delta2 = delay_ns - mean_delay;
-            m2_delay += delta * delta2;
-
-            if (delay_ns < stats->delay.min_ns) stats->delay.min_ns = delay_ns;
-            if (delay_ns > stats->delay.max_ns) stats->delay.max_ns = delay_ns;
-        }
-    }
-
-    free(b_matched);
-    free(b_indices);
-
-    // Calculate missed pulses
-    stats->delay.missed_a = a_count - n_delay;
-    stats->delay.missed_b = b_count - n_delay;
-
-    // Finalize delay statistics
-    finalize_delay_stats(&stats->delay, mean_delay, m2_delay, n_delay);
+    // Delay stats are now calculated by tic_matcher (streaming, cross-buffer)
+    // Just zero out the delay stats here - caller will merge matcher stats
+    finalize_delay_stats(&stats->delay, 0, 0, 0);
 }
 
 void tic_stats_print_channel(const tic_channel_stat_t *stats, const char *channel_name)

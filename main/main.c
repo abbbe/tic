@@ -8,11 +8,13 @@
 
 #include "tic_capture.h"
 #include "tic_stats.h"
+#include "tic_matcher.h"
 #include "tic_test.h"
 
 static const char *TAG = "tic_main";
 
 static esp_timer_handle_t s_stats_timer;
+static tic_matcher_t s_matcher;
 
 static void stats_timer_callback(void *arg)
 {
@@ -121,6 +123,13 @@ void app_main(void)
 
     uint32_t resolution = tic_capture_get_resolution();
 
+    // Initialize the streaming edge matcher
+    tic_matcher_init(&s_matcher, resolution);
+
+    // Max delay for matching: use half period of expected signal (conservative estimate)
+    // For unknown signals, use a large default (e.g., 1ms = 1,000,000 ns)
+    double max_delay_ns = 1000000.0;  // 1ms default
+
     while (1) {
         EventBits_t bits = xEventGroupWaitBits(
             event_group,
@@ -142,8 +151,31 @@ void app_main(void)
             size_t event_count;
             tic_event_t *events = tic_capture_get_ready_buffer(&event_count);
 
+            // Feed all events to the streaming matcher
+            uint64_t last_timestamp = 0;
+            for (size_t i = 0; i < event_count; i++) {
+                const tic_event_t *evt = &events[i];
+                if (evt->type == TIC_EVENT_OVERFLOW) {
+                    tic_matcher_feed_overflow(&s_matcher);
+                } else if (evt->type == TIC_EVENT_EDGE) {
+                    tic_matcher_feed_edge(&s_matcher, evt->channel, evt->value, max_delay_ns);
+                    // Track last timestamp for timeout calculation
+                    last_timestamp = evt->value;
+                }
+            }
+
+            // Timeout any stale pending edges (older than max_delay)
+            if (last_timestamp > 0) {
+                tic_matcher_timeout(&s_matcher, last_timestamp, max_delay_ns);
+            }
+
+            // Process period statistics
             tic_stats_t stats;
             tic_stats_process(events, event_count, resolution, &stats);
+
+            // Get delay stats from matcher and merge into stats
+            tic_matcher_get_stats(&s_matcher, &stats.delay, true);
+
             tic_stats_print(&stats);
         }
     }
