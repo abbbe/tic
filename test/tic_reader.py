@@ -206,18 +206,18 @@ def validate_results(
 
     # Report non-CSV output (warnings, errors from device) - any non-CSV line is a failure
     if non_csv_lines:
-        print("\nNon-CSV output from device (FAIL):")
+        print("\nNon-CSV output from device (FAIL):", file=sys.stderr)
         for line in non_csv_lines:
-            print(f"  {line}")
+            print(f"  {line}", file=sys.stderr)
         ok = False
 
     # Report sequence errors
     for err in errors:
-        print(f"ERROR: {err}")
+        print(f"ERROR: {err}", file=sys.stderr)
         ok = False
 
     if not rows:
-        print("FAIL: No data rows received")
+        print("FAIL: No data rows received", file=sys.stderr)
         return False
 
     # Use average of all rows for validation
@@ -225,33 +225,33 @@ def validate_results(
     avg_b_hz = sum(r.b_hz for r in rows) / len(rows)
     avg_delay = sum(r.d_avg_ns for r in rows) / len(rows)
 
-    print(f"\nResults (averaged over {len(rows)} samples):")
-    print(f"  Channel A: {avg_a_hz:.2f} Hz (expected {expected_freq_a:.2f} Hz)")
-    print(f"  Channel B: {avg_b_hz:.2f} Hz (expected {expected_freq_b:.2f} Hz)")
-    print(f"  Delay B-A: {avg_delay:.2f} ns (expected {expected_delay_ns:.2f} ns)")
+    print(f"\nResults (averaged over {len(rows)} samples):", file=sys.stderr)
+    print(f"  Channel A: {avg_a_hz:.2f} Hz (expected {expected_freq_a:.2f} Hz)", file=sys.stderr)
+    print(f"  Channel B: {avg_b_hz:.2f} Hz (expected {expected_freq_b:.2f} Hz)", file=sys.stderr)
+    print(f"  Delay B-A: {avg_delay:.2f} ns (expected {expected_delay_ns:.2f} ns)", file=sys.stderr)
 
     # Check frequency A
     if expected_freq_a > 0:
         freq_a_err = abs(avg_a_hz - expected_freq_a) / expected_freq_a * 100
         if freq_a_err > freq_tolerance_pct:
-            print(f"FAIL: Channel A frequency error {freq_a_err:.2f}% > {freq_tolerance_pct}%")
+            print(f"FAIL: Channel A frequency error {freq_a_err:.2f}% > {freq_tolerance_pct}%", file=sys.stderr)
             ok = False
 
     # Check frequency B
     if expected_freq_b > 0:
         freq_b_err = abs(avg_b_hz - expected_freq_b) / expected_freq_b * 100
         if freq_b_err > freq_tolerance_pct:
-            print(f"FAIL: Channel B frequency error {freq_b_err:.2f}% > {freq_tolerance_pct}%")
+            print(f"FAIL: Channel B frequency error {freq_b_err:.2f}% > {freq_tolerance_pct}%", file=sys.stderr)
             ok = False
 
     # Check delay
     delay_err = abs(avg_delay - expected_delay_ns)
     if delay_err > delay_tolerance_ns:
-        print(f"FAIL: Delay error {delay_err:.2f} ns > {delay_tolerance_ns} ns")
+        print(f"FAIL: Delay error {delay_err:.2f} ns > {delay_tolerance_ns} ns", file=sys.stderr)
         ok = False
 
     if ok:
-        print("PASS: All values within tolerance")
+        print("PASS: All values within tolerance", file=sys.stderr)
 
     return ok
 
