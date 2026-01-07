@@ -12,9 +12,19 @@
 
 static const char *TAG = "tic_main";
 
-static void periodic_timer_callback(void *arg)
+static esp_timer_handle_t s_stats_timer;
+
+static void stats_timer_callback(void *arg)
 {
+    // Timer fired = buffer didn't fill in time (low frequency case)
     tic_capture_force_swap();
+}
+
+static void reset_stats_timer(void)
+{
+    // Stop any pending timer and restart
+    esp_timer_stop(s_stats_timer);
+    esp_timer_start_once(s_stats_timer, CONFIG_TIC_STATS_PERIOD_MS * 1000);
 }
 
 void app_main(void)
@@ -75,14 +85,13 @@ void app_main(void)
         return;
     }
 
-    esp_timer_handle_t periodic_timer;
     const esp_timer_create_args_t timer_args = {
-        .callback = periodic_timer_callback,
+        .callback = stats_timer_callback,
         .name = "stats_timer",
     };
-    ret = esp_timer_create(&timer_args, &periodic_timer);
+    ret = esp_timer_create(&timer_args, &s_stats_timer);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to create periodic timer");
+        ESP_LOGE(TAG, "Failed to create stats timer");
         return;
     }
 
@@ -101,9 +110,10 @@ void app_main(void)
         return;
     }
 
-    ret = esp_timer_start_periodic(periodic_timer, CONFIG_TIC_STATS_PERIOD_MS * 1000);
+    // Start one-shot timer (will be reset after each buffer is processed)
+    ret = esp_timer_start_once(s_stats_timer, CONFIG_TIC_STATS_PERIOD_MS * 1000);
     if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to start periodic timer");
+        ESP_LOGE(TAG, "Failed to start stats timer");
         return;
     }
 
@@ -121,6 +131,14 @@ void app_main(void)
         );
 
         if (bits & TIC_BUFFER_READY_BIT) {
+            // Reset timer - guarantees minimum interval between reports
+            reset_stats_timer();
+
+            bool overrun = tic_capture_check_overrun();
+            if (overrun) {
+                ESP_LOGW(TAG, "OVERRUN: buffer was overwritten during processing");
+            }
+
             size_t event_count;
             tic_event_t *events = tic_capture_get_ready_buffer(&event_count);
 

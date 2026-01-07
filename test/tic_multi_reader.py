@@ -112,9 +112,11 @@ def device_reader(
     data_queue: queue.Queue,
     stop_event: threading.Event,
     boot_event: threading.Event,
-    quiet: bool = False
+    quiet: bool = False,
+    raw_log_file: Optional[str] = None
 ):
     """Thread function to read from a single device."""
+    raw_lines = []
     try:
         with serial.Serial(port, baudrate, timeout=1) as ser:
             reset_device(ser)
@@ -126,6 +128,7 @@ def device_reader(
                 if ser.in_waiting:
                     try:
                         line = ser.readline().decode('utf-8', errors='ignore')
+                        raw_lines.append(line)
                         if 'ESP-IDF' in line:
                             boot_found = True
                             boot_event.set()
@@ -137,14 +140,19 @@ def device_reader(
 
             if not boot_found:
                 data_queue.put(('error', device_id, "Boot timeout"))
+                if raw_log_file:
+                    with open(raw_log_file, 'w') as f:
+                        f.writelines(raw_lines)
                 return
 
             # Read CSV data
             expected_seq = 0
+            header_seen = False
             while not stop_event.is_set():
                 if ser.in_waiting:
                     try:
                         line = ser.readline().decode('utf-8', errors='ignore')
+                        raw_lines.append(line)
                         timestamp = time.time()
                         seq, row = parse_csv_line(line, device_id, timestamp)
 
@@ -153,17 +161,29 @@ def device_reader(
                                 data_queue.put(('seq_error', device_id, f"Expected {expected_seq}, got {seq}"))
                             expected_seq = seq + 1
 
-                            if row:
+                            if row is None:
+                                # This is the header line
+                                header_seen = True
+                            else:
                                 data_queue.put(('row', device_id, row))
                                 if not quiet:
                                     print(f"  D{device_id} CSV{seq}: A={row.a_hz:.1f}Hz B={row.b_hz:.1f}Hz "
                                           f"delay={row.d_avg_ns:.1f}ns miss={row.d_miss_a}/{row.d_miss_b}",
                                           file=sys.stderr)
+                        elif header_seen:
+                            # Non-CSV line after header - capture it
+                            stripped = line.strip()
+                            if stripped:
+                                data_queue.put(('non_csv', device_id, stripped))
                     except Exception as e:
                         data_queue.put(('error', device_id, str(e)))
 
     except Exception as e:
         data_queue.put(('error', device_id, f"Serial error: {e}"))
+    finally:
+        if raw_log_file:
+            with open(raw_log_file, 'w') as f:
+                f.writelines(raw_lines)
 
 
 def collect_data(
@@ -171,12 +191,14 @@ def collect_data(
     baudrate: int,
     duration: float,
     max_samples: int,
-    quiet: bool = False
-) -> Tuple[Dict[int, List[TicRow]], List[str]]:
-    """Collect data from multiple devices. Returns (device_rows, errors)."""
+    quiet: bool = False,
+    raw_log_prefix: Optional[str] = None
+) -> Tuple[Dict[int, List[TicRow]], List[str], Dict[int, List[str]]]:
+    """Collect data from multiple devices. Returns (device_rows, errors, non_csv_lines)."""
 
     device_rows: Dict[int, List[TicRow]] = defaultdict(list)
     errors: List[str] = []
+    non_csv_lines: Dict[int, List[str]] = defaultdict(list)
 
     data_queue: queue.Queue = queue.Queue()
     stop_event = threading.Event()
@@ -185,9 +207,10 @@ def collect_data(
     # Start reader threads
     threads = []
     for i, port in enumerate(ports):
+        raw_log_file = f"{raw_log_prefix}_d{i+1}.log" if raw_log_prefix else None
         t = threading.Thread(
             target=device_reader,
-            args=(i + 1, port, baudrate, data_queue, stop_event, boot_events[i], quiet)
+            args=(i + 1, port, baudrate, data_queue, stop_event, boot_events[i], quiet, raw_log_file)
         )
         t.daemon = True
         t.start()
@@ -209,7 +232,7 @@ def collect_data(
         stop_event.set()
         for t in threads:
             t.join(timeout=2)
-        return device_rows, errors
+        return device_rows, errors, dict(non_csv_lines)
 
     if not quiet:
         print("All devices booted, collecting data...", file=sys.stderr)
@@ -238,6 +261,8 @@ def collect_data(
                 errors.append(f"D{device_id}: {data}")
             elif msg_type == 'seq_error':
                 errors.append(f"D{device_id} seq: {data}")
+            elif msg_type == 'non_csv':
+                non_csv_lines[device_id].append(data)
 
         except queue.Empty:
             pass
@@ -253,15 +278,18 @@ def collect_data(
             msg_type, device_id, data = data_queue.get_nowait()
             if msg_type == 'row':
                 device_rows[device_id].append(data)
+            elif msg_type == 'non_csv':
+                non_csv_lines[device_id].append(data)
         except queue.Empty:
             break
 
-    return dict(device_rows), errors
+    return dict(device_rows), errors, dict(non_csv_lines)
 
 
 def analyze_results(
     device_rows: Dict[int, List[TicRow]],
     errors: List[str],
+    non_csv_lines: Dict[int, List[str]],
     expected_freq: float,
     skip_samples: int,
     freq_tolerance_ppm: float
@@ -270,23 +298,32 @@ def analyze_results(
 
     ok = True
 
+    # Report non-CSV output (warnings, errors from devices) - any non-CSV line is a failure
+    if non_csv_lines:
+        print("\nNon-CSV output from devices (FAIL):", file=sys.stderr)
+        for device_id in sorted(non_csv_lines.keys()):
+            for line in non_csv_lines[device_id]:
+                print(f"  D{device_id}: {line}", file=sys.stderr)
+        ok = False
+
     # Report errors
     for err in errors:
-        print(f"ERROR: {err}")
+        print(f"ERROR: {err}", file=sys.stderr)
         if "Boot timeout" in err:
             ok = False
 
     if not device_rows:
-        print("FAIL: No data collected")
+        print("FAIL: No data collected", file=sys.stderr)
         return False
 
-    print(f"\n{'='*60}")
-    print("MULTI-DEVICE TEST RESULTS")
-    print(f"{'='*60}")
+    print(f"\n{'='*60}", file=sys.stderr)
+    print("MULTI-DEVICE TEST RESULTS", file=sys.stderr)
+    print(f"{'='*60}", file=sys.stderr)
 
     # Per-device analysis
     all_freqs_a = []
     all_freqs_b = []
+    all_delays = []
     all_delay_stds = []
 
     for device_id in sorted(device_rows.keys()):
@@ -294,7 +331,7 @@ def analyze_results(
 
         # Skip initial samples (may have missed edges due to startup timing)
         if len(rows) <= skip_samples:
-            print(f"\nDevice {device_id}: Only {len(rows)} samples, need > {skip_samples}")
+            print(f"\nDevice {device_id}: Only {len(rows)} samples, need > {skip_samples}", file=sys.stderr)
             ok = False
             continue
 
@@ -303,41 +340,45 @@ def analyze_results(
         # Calculate statistics
         freqs_a = [r.a_hz for r in valid_rows]
         freqs_b = [r.b_hz for r in valid_rows]
+        delays = [r.d_avg_ns for r in valid_rows]
         delay_stds = [r.d_std_ns for r in valid_rows]
         miss_a = [r.d_miss_a for r in valid_rows]
         miss_b = [r.d_miss_b for r in valid_rows]
 
         avg_freq_a = sum(freqs_a) / len(freqs_a)
         avg_freq_b = sum(freqs_b) / len(freqs_b)
+        avg_delay = sum(delays) / len(delays)
         avg_delay_std = sum(delay_stds) / len(delay_stds)
         total_miss_a = sum(miss_a)
         total_miss_b = sum(miss_b)
 
         all_freqs_a.append(avg_freq_a)
         all_freqs_b.append(avg_freq_b)
+        all_delays.append(avg_delay)
         all_delay_stds.append(avg_delay_std)
 
         freq_a_err_ppm = abs(avg_freq_a - expected_freq) / expected_freq * 1e6
         freq_b_err_ppm = abs(avg_freq_b - expected_freq) / expected_freq * 1e6
 
-        print(f"\nDevice {device_id} ({len(valid_rows)} samples after skipping {skip_samples}):")
-        print(f"  Channel A: {avg_freq_a:.4f} Hz (error: {freq_a_err_ppm:.1f} ppm)")
-        print(f"  Channel B: {avg_freq_b:.4f} Hz (error: {freq_b_err_ppm:.1f} ppm)")
-        print(f"  Delay StdDev: {avg_delay_std:.2f} ns (avg)")
-        print(f"  Missed edges: A={total_miss_a} B={total_miss_b}")
+        print(f"\nDevice {device_id} ({len(valid_rows)} samples after skipping {skip_samples}):", file=sys.stderr)
+        print(f"  Channel A: {avg_freq_a:.4f} Hz (error: {freq_a_err_ppm:.1f} ppm)", file=sys.stderr)
+        print(f"  Channel B: {avg_freq_b:.4f} Hz (error: {freq_b_err_ppm:.1f} ppm)", file=sys.stderr)
+        print(f"  Delay Mean: {avg_delay:.2f} ns", file=sys.stderr)
+        print(f"  Delay StdDev: {avg_delay_std:.2f} ns (avg)", file=sys.stderr)
+        print(f"  Missed edges: A={total_miss_a} B={total_miss_b}", file=sys.stderr)
 
         if freq_a_err_ppm > freq_tolerance_ppm:
-            print(f"  FAIL: Channel A frequency error {freq_a_err_ppm:.1f} ppm > {freq_tolerance_ppm} ppm")
+            print(f"  FAIL: Channel A frequency error {freq_a_err_ppm:.1f} ppm > {freq_tolerance_ppm} ppm", file=sys.stderr)
             ok = False
         if freq_b_err_ppm > freq_tolerance_ppm:
-            print(f"  FAIL: Channel B frequency error {freq_b_err_ppm:.1f} ppm > {freq_tolerance_ppm} ppm")
+            print(f"  FAIL: Channel B frequency error {freq_b_err_ppm:.1f} ppm > {freq_tolerance_ppm} ppm", file=sys.stderr)
             ok = False
 
     # Cross-device analysis
     if len(all_freqs_a) >= 2:
-        print(f"\n{'='*60}")
-        print("CROSS-DEVICE COMPARISON")
-        print(f"{'='*60}")
+        print(f"\n{'='*60}", file=sys.stderr)
+        print("CROSS-DEVICE COMPARISON", file=sys.stderr)
+        print(f"{'='*60}", file=sys.stderr)
 
         # Frequency spread across devices
         freq_spread_a = max(all_freqs_a) - min(all_freqs_a)
@@ -345,19 +386,19 @@ def analyze_results(
         freq_spread_a_ppm = freq_spread_a / expected_freq * 1e6
         freq_spread_b_ppm = freq_spread_b / expected_freq * 1e6
 
-        print(f"\nFrequency spread across devices:")
-        print(f"  Channel A: {freq_spread_a:.4f} Hz ({freq_spread_a_ppm:.1f} ppm)")
-        print(f"  Channel B: {freq_spread_b:.4f} Hz ({freq_spread_b_ppm:.1f} ppm)")
+        print(f"\nFrequency spread across devices:", file=sys.stderr)
+        print(f"  Channel A: {freq_spread_a:.4f} Hz ({freq_spread_a_ppm:.1f} ppm)", file=sys.stderr)
+        print(f"  Channel B: {freq_spread_b:.4f} Hz ({freq_spread_b_ppm:.1f} ppm)", file=sys.stderr)
 
-        print(f"\nDelay StdDev (jitter) per device:")
+        print(f"\nDelay StdDev (jitter) per device:", file=sys.stderr)
         for i, std in enumerate(all_delay_stds):
-            print(f"  Device {i+1}: {std:.2f} ns")
+            print(f"  Device {i+1}: {std:.2f} ns", file=sys.stderr)
 
-    print(f"\n{'='*60}")
+    print(f"\n{'='*60}", file=sys.stderr)
     if ok:
-        print("PASS: All values within tolerance")
+        print("PASS: All values within tolerance", file=sys.stderr)
     else:
-        print("FAIL: One or more values out of tolerance")
+        print("FAIL: One or more values out of tolerance", file=sys.stderr)
 
     return ok
 
@@ -382,6 +423,10 @@ def main():
                         help='Suppress per-row output')
     parser.add_argument('--output', '-o', type=str, default=None,
                         help='Output CSV file for raw data')
+    parser.add_argument('--raw-log-prefix', type=str, default=None,
+                        help='Prefix for raw serial log files (creates <prefix>_d1.log, <prefix>_d2.log, ...)')
+    parser.add_argument('--csv-rows', action='store_true',
+                        help='Output CSV rows to stdout (one per device): device,freq_a,freq_b,delay')
 
     args = parser.parse_args()
 
@@ -391,12 +436,13 @@ def main():
 
     print(f"Reading from {len(ports)} devices: {ports}", file=sys.stderr)
 
-    device_rows, errors = collect_data(
+    device_rows, errors, non_csv_lines = collect_data(
         ports,
         args.baudrate,
         args.duration,
         args.samples + args.skip_samples,  # Collect extra to account for skipping
-        args.quiet
+        args.quiet,
+        args.raw_log_prefix
     )
 
     # Write raw data if requested
@@ -414,10 +460,22 @@ def main():
     ok = analyze_results(
         device_rows,
         errors,
+        non_csv_lines,
         args.expected_freq,
         args.skip_samples,
         args.freq_tolerance_ppm
     )
+
+    # Output CSV rows if requested (one per device)
+    if args.csv_rows and device_rows:
+        for device_id in sorted(device_rows.keys()):
+            rows = device_rows[device_id]
+            if len(rows) > args.skip_samples:
+                valid_rows = rows[args.skip_samples:]
+                avg_freq_a = sum(r.a_hz for r in valid_rows) / len(valid_rows)
+                avg_freq_b = sum(r.b_hz for r in valid_rows) / len(valid_rows)
+                avg_delay = sum(r.d_avg_ns for r in valid_rows) / len(valid_rows)
+                print(f"{device_id},{avg_freq_a:.2f},{avg_freq_b:.2f},{avg_delay:.2f}")
 
     sys.exit(0 if ok else 1)
 

@@ -1,6 +1,8 @@
 #include "tic_stats.h"
 #include "esp_log.h"
 #include "sdkconfig.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include <math.h>
 #include <float.h>
 #include <stdlib.h>
@@ -188,6 +190,9 @@ void tic_stats_process(const tic_event_t *events, size_t event_count,
     finalize_channel_stats(&stats->ch_a, mean_a, m2_a, n_a);
     finalize_channel_stats(&stats->ch_b, mean_b, m2_b, n_b);
 
+    // Yield to prevent task watchdog from triggering
+    taskYIELD();
+
     // === Second pass: calculate relative delays between channels ===
     // Use half the mean period as the matching window
     double window_ns = 0.0;
@@ -256,6 +261,11 @@ void tic_stats_process(const tic_event_t *events, size_t event_count,
     size_t last_matched_b = 0;  // Track last matched B index (not event position)
 
     for (size_t i = 0; i < event_count; i++) {
+        // Periodic yield to prevent task watchdog
+        if (i % 500 == 0) {
+            taskYIELD();
+        }
+
         const tic_event_t *evt_a = &events[i];
 
         if (evt_a->type != TIC_EVENT_EDGE || evt_a->channel != TIC_CHANNEL_A) {

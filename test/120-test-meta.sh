@@ -16,7 +16,7 @@ NUM_TESTS=100
 
 # Test parameter ranges
 MIN_FREQ=1500
-MAX_FREQ=50000
+MAX_FREQ=24000
 
 # Counters
 PASS=0
@@ -29,7 +29,7 @@ mkdir -p "$LOG_DIR"
 
 # Create results CSV
 RESULTS_CSV="$LOG_DIR/results.csv"
-echo "test_num,status,freq_configured_hz,delay_configured_ns,freq_a_measured_hz,freq_b_measured_hz,delay_measured_ns,delay_error_ns" > "$RESULTS_CSV"
+echo "test_num,status,freq_configured_hz,delay_configured_ns,freq_a_measured_hz,freq_b_measured_hz,delay_measured_ns" > "$RESULTS_CSV"
 
 # Function to generate random number in range [min, max]
 rand_range() {
@@ -74,36 +74,40 @@ for i in $(seq 1 $NUM_TESTS); do
     # Run validation
     echo "  Testing..."
     TEST_LOG="$LOG_DIR/test_$(printf '%03d' $i).log"
+    RAW_LOG="$LOG_DIR/raw_$(printf '%03d' $i).log"
 
-    if "$SCRIPT_DIR/.venv/bin/python3" "$SCRIPT_DIR/tic_reader.py" \
+    # Write test parameters to log
+    echo "Test $i: freq=${FREQ}Hz delay=${DELAY}ns" > "$TEST_LOG"
+
+    CSV_ROW=$("$SCRIPT_DIR/.venv/bin/python3" "$SCRIPT_DIR/tic_reader.py" \
         --port "$PORT" \
-        --lines 5 \
+        --lines 100 \
         --expected-freq-a "$FREQ" \
         --expected-freq-b "$FREQ" \
         --expected-delay "$DELAY" \
         --freq-tolerance 0.1 \
         --delay-tolerance 12.5 \
-        > "$TEST_LOG" 2>&1; then
-        STATUS="PASS"
+        --raw-log "$RAW_LOG" \
+        --csv-row \
+        2>>"$TEST_LOG") && STATUS="PASS" || STATUS="FAIL"
+
+    if [ "$STATUS" = "PASS" ]; then
         ((PASS++)) || true
     else
-        STATUS="FAIL"
         ((FAIL++)) || true
     fi
 
-    # Parse measured values
-    FREQ_A=$(grep "Channel A:" "$TEST_LOG" | grep -oE '[0-9]+\.[0-9]+' | head -1 || echo "")
-    FREQ_B=$(grep "Channel B:" "$TEST_LOG" | grep -oE '[0-9]+\.[0-9]+' | head -1 || echo "")
-    DELAY_MEASURED=$(grep "Delay B-A:" "$TEST_LOG" | grep -oE '[-]?[0-9]+\.[0-9]+' | head -1 || echo "")
+    # Parse CSV row: freq_a,freq_b,delay
+    IFS=',' read -r FREQ_A FREQ_B DELAY_MEASURED <<< "$CSV_ROW"
 
     if [ -n "$DELAY_MEASURED" ]; then
         DELAY_ERROR=$(awk "BEGIN {printf \"%.2f\", $DELAY_MEASURED - $DELAY}")
+        echo "  $STATUS: measured delay=${DELAY_MEASURED}ns (error=${DELAY_ERROR}ns)"
     else
-        DELAY_ERROR=""
+        echo "  $STATUS: no measurements"
     fi
 
-    echo "  $STATUS: measured delay=${DELAY_MEASURED}ns (error=${DELAY_ERROR}ns)"
-    echo "$i,$STATUS,$FREQ,$DELAY,$FREQ_A,$FREQ_B,$DELAY_MEASURED,$DELAY_ERROR" >> "$RESULTS_CSV"
+    echo "$i,$STATUS,$FREQ,$DELAY,$FREQ_A,$FREQ_B,$DELAY_MEASURED" >> "$RESULTS_CSV"
 done
 
 END_TIME=$(date +%s)

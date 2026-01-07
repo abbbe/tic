@@ -32,6 +32,11 @@ static EventGroupHandle_t s_event_group = NULL;
 // Spinlock for protecting buffer swap from both ISR and task context
 static portMUX_TYPE spinlock = portMUX_INITIALIZER_UNLOCKED;
 
+// Overrun detection - set when ready buffer is overwritten before processing completes
+static volatile bool s_overrun_flag = false;
+// Tracks if the ready buffer has been fetched since last swap
+static volatile bool s_swap_pending = false;
+
 // Capture callback - runs in ISR context
 // user_ctx contains the channel number (0 for A, 1 for B)
 static bool IRAM_ATTR capture_callback(mcpwm_cap_channel_handle_t cap_chan,
@@ -62,6 +67,11 @@ static bool IRAM_ATTR capture_callback(mcpwm_cap_channel_handle_t cap_chan,
 
     // Check if we've reached the threshold for buffer swap
     if (s_active_count >= s_edges_per_buffer) {
+        // Check for overrun: previous buffer wasn't fetched before this swap
+        if (s_swap_pending) {
+            s_overrun_flag = true;
+        }
+
         // Swap buffers
         tic_event_t *old_active = s_active_buffer;
         size_t old_count = s_active_count;
@@ -77,6 +87,7 @@ static bool IRAM_ATTR capture_callback(mcpwm_cap_channel_handle_t cap_chan,
         // The old active buffer is now the ready buffer
         s_ready_buffer = old_active;
         s_ready_count = old_count;
+        s_swap_pending = true;
 
         portEXIT_CRITICAL_ISR(&spinlock);
 
@@ -224,9 +235,11 @@ esp_err_t tic_capture_start(void)
 
     ESP_LOGI(TAG, "Starting capture");
 
-    // Clear buffers and event group
+    // Clear buffers, overrun flags, and event group
     s_active_count = 0;
     s_ready_count = 0;
+    s_swap_pending = false;
+    s_overrun_flag = false;
     xEventGroupClearBits(s_event_group, TIC_BUFFER_READY_BIT);
 
     return mcpwm_capture_timer_start(s_cap_timer);
@@ -249,6 +262,7 @@ EventGroupHandle_t tic_capture_get_event_group(void)
 
 tic_event_t* tic_capture_get_ready_buffer(size_t *count)
 {
+    s_swap_pending = false;  // Acknowledge buffer fetch
     *count = s_ready_count;
     return s_ready_buffer;
 }
@@ -265,6 +279,11 @@ void tic_capture_force_swap(void)
 
     // Only swap if there's anything in the active buffer or if ready buffer is empty
     if (s_active_count > 0 || s_ready_count == 0) {
+        // Check for overrun: previous buffer wasn't fetched before this swap
+        if (s_swap_pending) {
+            s_overrun_flag = true;
+        }
+
         // Swap buffers
         tic_event_t *old_active = s_active_buffer;
         size_t old_count = s_active_count;
@@ -280,6 +299,7 @@ void tic_capture_force_swap(void)
         // The old active buffer is now the ready buffer
         s_ready_buffer = old_active;
         s_ready_count = old_count;
+        s_swap_pending = true;
     }
 
     portEXIT_CRITICAL(&spinlock);
@@ -288,4 +308,11 @@ void tic_capture_force_swap(void)
     if (s_event_group) {
         xEventGroupSetBits(s_event_group, TIC_BUFFER_READY_BIT);
     }
+}
+
+bool tic_capture_check_overrun(void)
+{
+    bool overrun = s_overrun_flag;
+    s_overrun_flag = false;
+    return overrun;
 }

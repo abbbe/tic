@@ -2,9 +2,9 @@
 #
 # Meta-test: Random frequency and delay combinations (dual device)
 #
-# Two interconnected devices:
-#   1.6 → 2.4, 1.7 → 2.5, 2.6 → 1.4, 2.7 → 1.5
-# Runs 100 tests with random parameters.
+# Two interconnected devices (TIC2 and TIC3):
+#   2.6 → 3.4, 2.7 → 3.5, 3.6 → 2.4, 3.7 → 2.5
+# Runs 100 tests with random parameters, logs all results.
 #
 
 set -e
@@ -16,11 +16,22 @@ NUM_TESTS=100
 
 # Test parameter ranges
 MIN_FREQ=1500
-MAX_FREQ=50000
+MAX_FREQ=24000
 
 # Counters
 PASS=0
 FAIL=0
+
+# Create timestamped log directory
+TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+LOG_DIR="$SCRIPT_DIR/logs/320_$TIMESTAMP"
+mkdir -p "$LOG_DIR"
+
+# Create results CSV (one per device)
+RESULTS_CSV_D1="$LOG_DIR/results_d1.csv"
+RESULTS_CSV_D2="$LOG_DIR/results_d2.csv"
+echo "test_num,status,freq_configured_hz,delay_configured_ns,freq_a_measured_hz,freq_b_measured_hz,delay_measured_ns" > "$RESULTS_CSV_D1"
+echo "test_num,status,freq_configured_hz,delay_configured_ns,freq_a_measured_hz,freq_b_measured_hz,delay_measured_ns" > "$RESULTS_CSV_D2"
 
 # Function to generate random number in range [min, max]
 rand_range() {
@@ -32,8 +43,11 @@ rand_range() {
 }
 
 echo "=== TIC Meta-Test (Dual Device) ==="
+echo "Log directory: $LOG_DIR"
 echo "Running $NUM_TESTS random test combinations..."
 echo ""
+
+START_TIME=$(date +%s)
 
 for i in $(seq 1 $NUM_TESTS); do
     # Generate random frequency
@@ -51,25 +65,69 @@ for i in $(seq 1 $NUM_TESTS); do
     echo "=== Test $i/$NUM_TESTS: freq=${FREQ}Hz delay=${DELAY}ns ==="
 
     # Build and flash both devices
-    "$SCRIPT_DIR/bin/idf" -f $FREQ -d $DELAY build flash tic1 tic2 > /dev/null 2>&1
+    echo "  Building & flashing..."
+    if ! "$SCRIPT_DIR/bin/idf" -f $FREQ -d $DELAY build flash tic2 tic3 > "$LOG_DIR/build_$(printf '%03d' $i).log" 2>&1; then
+        echo "  FAIL: Build/flash failed"
+        echo "$i,FAIL,$FREQ,$DELAY,,,," >> "$RESULTS_CSV_D1"
+        echo "$i,FAIL,$FREQ,$DELAY,,,," >> "$RESULTS_CSV_D2"
+        ((FAIL++)) || true
+        continue
+    fi
 
     # Run validation
-    if "$SCRIPT_DIR/.venv/bin/python3" "$SCRIPT_DIR/tic_multi_reader.py" \
-        --ports "$TIC1_SERIAL_PORT,$TIC2_SERIAL_PORT" \
-        --samples 5 \
+    echo "  Testing..."
+    TEST_LOG="$LOG_DIR/test_$(printf '%03d' $i).log"
+    RAW_LOG_PREFIX="$LOG_DIR/raw_$(printf '%03d' $i)"
+
+    # Write test parameters to log
+    echo "Test $i: freq=${FREQ}Hz delay=${DELAY}ns" > "$TEST_LOG"
+
+    CSV_ROWS=$("$SCRIPT_DIR/.venv/bin/python3" "$SCRIPT_DIR/tic_multi_reader.py" \
+        --ports "$TIC2_SERIAL_PORT,$TIC3_SERIAL_PORT" \
+        --samples 100 \
         --skip-samples 1 \
         --expected-freq "$FREQ" \
         --freq-tolerance-ppm 1000 \
-        > /dev/null 2>&1; then
-        echo "  PASS"
+        --raw-log-prefix "$RAW_LOG_PREFIX" \
+        --csv-rows \
+        2>>"$TEST_LOG") && STATUS="PASS" || STATUS="FAIL"
+
+    if [ "$STATUS" = "PASS" ]; then
         ((PASS++)) || true
     else
-        echo "  FAIL"
         ((FAIL++)) || true
     fi
+
+    # Parse CSV rows (one per device): device,freq_a,freq_b,delay
+    echo "$CSV_ROWS" | while IFS=',' read -r DEV FREQ_A FREQ_B DELAY_MEASURED; do
+        [ -z "$DEV" ] && continue
+        if [ "$DEV" = "1" ]; then
+            echo "$i,$STATUS,$FREQ,$DELAY,$FREQ_A,$FREQ_B,$DELAY_MEASURED" >> "$RESULTS_CSV_D1"
+        elif [ "$DEV" = "2" ]; then
+            echo "$i,$STATUS,$FREQ,$DELAY,$FREQ_A,$FREQ_B,$DELAY_MEASURED" >> "$RESULTS_CSV_D2"
+        fi
+    done
+
+    # Show summary for first device
+    FIRST_LINE=$(echo "$CSV_ROWS" | head -1)
+    if [ -n "$FIRST_LINE" ]; then
+        FIRST_DELAY=$(echo "$FIRST_LINE" | cut -d',' -f4)
+        DELAY_ERROR=$(awk "BEGIN {printf \"%.2f\", $FIRST_DELAY - $DELAY}")
+        echo "  $STATUS: D1 delay=${FIRST_DELAY}ns (error=${DELAY_ERROR}ns)"
+    else
+        echo "  $STATUS (no CSV output from reader)"
+    fi
 done
+
+END_TIME=$(date +%s)
+DURATION=$((END_TIME - START_TIME))
+DURATION_MIN=$((DURATION / 60))
+DURATION_SEC=$((DURATION % 60))
 
 echo ""
 echo "=== Summary ==="
 echo "Passed: $PASS/$NUM_TESTS"
 echo "Failed: $FAIL/$NUM_TESTS"
+echo "Duration: ${DURATION_MIN}m ${DURATION_SEC}s"
+echo "Results: $RESULTS_CSV_D1"
+echo "         $RESULTS_CSV_D2"

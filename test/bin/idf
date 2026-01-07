@@ -216,7 +216,7 @@ if [[ "$DO_BUILD" == true ]]; then
         -DIDF_TARGET="$IDF_TARGET" \
         -DSDKCONFIG="$BUILD_DIR/sdkconfig" \
         -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;$SDKCONFIG_FILE" \
-        build
+        reconfigure build
     echo ""
 fi
 

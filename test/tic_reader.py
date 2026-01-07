@@ -113,19 +113,38 @@ def wait_for_boot(ser: serial.Serial, timeout: float = 5.0) -> bool:
 
 
 def read_tic_data(port: str, baudrate: int, duration: float, max_lines: int,
-                  quiet: bool = False) -> Tuple[List[TicRow], List[str]]:
-    """Read TIC CSV data from serial port. Returns (rows, errors)."""
+                  quiet: bool = False, raw_log_file: Optional[str] = None) -> Tuple[List[TicRow], List[str], List[str]]:
+    """Read TIC CSV data from serial port. Returns (rows, errors, non_csv_lines)."""
     rows = []
     errors = []
+    non_csv_lines = []
+    raw_lines = []
     expected_seq = 0
+    header_seen = False
 
     with serial.Serial(port, baudrate, timeout=1) as ser:
         reset_device(ser)
 
         # Wait for boot marker
-        if not wait_for_boot(ser):
+        boot_timeout = time.time() + 5.0
+        boot_found = False
+        while time.time() < boot_timeout:
+            if ser.in_waiting:
+                try:
+                    line = ser.readline().decode('utf-8', errors='ignore')
+                    raw_lines.append(line)
+                    if 'ESP-IDF' in line:
+                        boot_found = True
+                        break
+                except Exception:
+                    pass
+
+        if not boot_found:
             errors.append("Timeout waiting for ESP-IDF boot marker")
-            return rows, errors
+            if raw_log_file:
+                with open(raw_log_file, 'w') as f:
+                    f.writelines(raw_lines)
+            return rows, errors, non_csv_lines
 
         start = time.time()
         while True:
@@ -138,6 +157,7 @@ def read_tic_data(port: str, baudrate: int, duration: float, max_lines: int,
             if ser.in_waiting:
                 try:
                     line = ser.readline().decode('utf-8', errors='ignore')
+                    raw_lines.append(line)
                     seq, row = parse_csv_line(line)
 
                     if seq is not None:
@@ -146,20 +166,34 @@ def read_tic_data(port: str, baudrate: int, duration: float, max_lines: int,
                             errors.append(f"Sequence error: expected {expected_seq}, got {seq}")
                         expected_seq = seq + 1
 
-                        if row:
+                        if row is None:
+                            # This is the header line
+                            header_seen = True
+                        else:
                             rows.append(row)
                             if not quiet:
                                 print(f"  CSV{seq}: A={row.a_hz:.1f}Hz B={row.b_hz:.1f}Hz "
                                       f"delay={row.d_avg_ns:.1f}ns", file=sys.stderr)
+                    elif header_seen:
+                        # Non-CSV line after header - capture it
+                        stripped = line.strip()
+                        if stripped:
+                            non_csv_lines.append(stripped)
                 except Exception:
                     pass
 
-    return rows, errors
+    # Write raw log if requested
+    if raw_log_file:
+        with open(raw_log_file, 'w') as f:
+            f.writelines(raw_lines)
+
+    return rows, errors, non_csv_lines
 
 
 def validate_results(
     rows: List[TicRow],
     errors: List[str],
+    non_csv_lines: List[str],
     expected_freq_a: float,
     expected_freq_b: float,
     expected_delay_ns: float,
@@ -169,6 +203,13 @@ def validate_results(
     """Validate collected results against expected values."""
 
     ok = True
+
+    # Report non-CSV output (warnings, errors from device) - any non-CSV line is a failure
+    if non_csv_lines:
+        print("\nNon-CSV output from device (FAIL):")
+        for line in non_csv_lines:
+            print(f"  {line}")
+        ok = False
 
     # Report sequence errors
     for err in errors:
@@ -237,6 +278,10 @@ def main():
                         help='Delay tolerance in ns (default: 12.5)')
     parser.add_argument('--quiet', '-q', action='store_true',
                         help='Suppress per-row output')
+    parser.add_argument('--raw-log', type=str, default=None,
+                        help='File to save raw serial output')
+    parser.add_argument('--csv-row', action='store_true',
+                        help='Output CSV row to stdout: freq_a,freq_b,delay')
 
     args = parser.parse_args()
 
@@ -244,17 +289,25 @@ def main():
         parser.error("Must specify --duration or --lines")
 
     print(f"Reading TIC data from {args.port}...", file=sys.stderr)
-    rows, errors = read_tic_data(args.port, args.baudrate, args.duration, args.lines, args.quiet)
+    rows, errors, non_csv_lines = read_tic_data(args.port, args.baudrate, args.duration, args.lines, args.quiet, args.raw_log)
 
     ok = validate_results(
         rows,
         errors,
+        non_csv_lines,
         args.expected_freq_a,
         args.expected_freq_b,
         args.expected_delay,
         args.freq_tolerance,
         args.delay_tolerance,
     )
+
+    # Output CSV row if requested
+    if args.csv_row and rows:
+        avg_a_hz = sum(r.a_hz for r in rows) / len(rows)
+        avg_b_hz = sum(r.b_hz for r in rows) / len(rows)
+        avg_delay = sum(r.d_avg_ns for r in rows) / len(rows)
+        print(f"{avg_a_hz:.2f},{avg_b_hz:.2f},{avg_delay:.2f}")
 
     sys.exit(0 if ok else 1)
 

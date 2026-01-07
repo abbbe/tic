@@ -75,3 +75,11 @@ uint32_t tic_capture_get_resolution(void);
  * even if edge count threshold is not reached.
  */
 void tic_capture_force_swap(void);
+
+/**
+ * @brief Check and clear the buffer overrun flag
+ *
+ * @return true if a buffer overrun occurred since last check
+ *         (ready buffer was overwritten before being processed)
+ */
+bool tic_capture_check_overrun(void);
