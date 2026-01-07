@@ -268,6 +268,13 @@ if [[ "$DO_BUILD" == true ]]; then
         rm -f "$BUILD_DIR/CMakeCache.txt"
     fi
 
+    # Check if Kconfig.projbuild changed (defines available options)
+    if [[ -f "$BUILD_DIR/sdkconfig" && "main/Kconfig.projbuild" -nt "$BUILD_DIR/sdkconfig" ]]; then
+        echo "Kconfig.projbuild changed, forcing rebuild..."
+        rm -f "$BUILD_DIR/sdkconfig"
+        rm -f "$BUILD_DIR/CMakeCache.txt"
+    fi
+
     idf.py -B "$BUILD_DIR" \
         -DIDF_TARGET="$IDF_TARGET" \
         -DSDKCONFIG="$BUILD_DIR/sdkconfig" \
