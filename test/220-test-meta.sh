@@ -71,7 +71,7 @@ for i in $(seq 1 $NUM_TESTS); do
     echo "  Building & flashing..."
     if ! "$SCRIPT_DIR/bin/idf" -f $FREQ -d $DELAY build flash tic1 > "$LOG_DIR/build_$(printf '%03d' $i).log" 2>&1; then
         echo "  FAIL: Build/flash failed"
-        echo "$i,FAIL,$FREQ,$DELAY,,,," >> "$RESULTS_CSV"
+        echo "$i,FAIL,$FREQ,$DELAY,,," >> "$RESULTS_CSV"
         ((FAIL++)) || true
         continue
     fi
