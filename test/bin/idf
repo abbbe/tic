@@ -15,6 +15,7 @@
 #   -f, --freq HZ       - Signal generator frequency (default: 2000)
 #   -d, --delay NS      - Channel B delay in ns (default: 0)
 #   -m, --mode MODE     - Build mode: loopback or normal (default: normal)
+#   -b, --build-dir DIR - Custom build directory (default: build/<mode>)
 #   --no-reset          - Don't reset on monitor
 #
 # Targets:
@@ -63,6 +64,7 @@ NO_RESET=false
 MODE="normal"
 FREQ_HZ=2000
 DELAY_NS=0
+CUSTOM_BUILD_DIR=""
 TARGETS=()
 
 # Parse arguments
@@ -99,6 +101,10 @@ while [[ $# -gt 0 ]]; do
         --no-reset)
             NO_RESET=true
             shift
+            ;;
+        -b|--build-dir)
+            CUSTOM_BUILD_DIR="$2"
+            shift 2
             ;;
         tic1|tic2|tic3|all)
             TARGETS+=("$1")
@@ -187,7 +193,12 @@ cd "$PROJECT_DIR"
 # Source ESP-IDF
 source "$ESP_IDF_EXPORT" > /dev/null 2>&1
 
-BUILD_DIR="build/$MODE"
+# Set build directory (custom or default)
+if [[ -n "$CUSTOM_BUILD_DIR" ]]; then
+    BUILD_DIR="$CUSTOM_BUILD_DIR"
+else
+    BUILD_DIR="build/$MODE"
+fi
 SDKCONFIG_FILE="$BUILD_DIR/sdkconfig.$MODE"
 
 echo "=== TIC Build Helper ==="
@@ -209,14 +220,30 @@ fi
 if [[ "$DO_BUILD" == true ]]; then
     echo "=== Building ==="
     mkdir -p "$BUILD_DIR"
-    generate_sdkconfig "$MODE" > "$SDKCONFIG_FILE"
-    # Remove existing sdkconfig to force regeneration from defaults
-    rm -f "$BUILD_DIR/sdkconfig"
+
+    # Generate new sdkconfig defaults
+    NEW_SDKCONFIG=$(generate_sdkconfig "$MODE")
+
+    # Check if config changed
+    if [[ -f "$SDKCONFIG_FILE" ]]; then
+        OLD_SDKCONFIG=$(cat "$SDKCONFIG_FILE")
+    else
+        OLD_SDKCONFIG=""
+    fi
+
+    if [[ "$NEW_SDKCONFIG" != "$OLD_SDKCONFIG" ]]; then
+        echo "Config changed, forcing rebuild..."
+        echo "$NEW_SDKCONFIG" > "$SDKCONFIG_FILE"
+        # Remove sdkconfig and cmake cache to force full regeneration
+        rm -f "$BUILD_DIR/sdkconfig"
+        rm -f "$BUILD_DIR/CMakeCache.txt"
+    fi
+
     idf.py -B "$BUILD_DIR" \
         -DIDF_TARGET="$IDF_TARGET" \
         -DSDKCONFIG="$BUILD_DIR/sdkconfig" \
         -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;$SDKCONFIG_FILE" \
-        reconfigure build
+        build
     echo ""
 fi
 
