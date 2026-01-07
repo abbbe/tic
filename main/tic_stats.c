@@ -280,10 +280,10 @@ static void print_header(void)
 #else
     ESP_LOGI(TAG, "A_N  |   A_Hz|A_min_us|A_avg_us|A_max_us|A_std_us|"
                   "B_N  |   B_Hz|B_min_us|B_avg_us|B_max_us|B_std_us|"
-                  "D_N  |D_min_ns|D_avg_ns|D_max_ns|D_std_ns|D_missA|D_missB|CPU0|CPU1");
+                  "D_N  |   D_min_ns|   D_avg_ns|   D_max_ns|   D_std_ns|D_missA|D_missB|CPU0|CPU1");
     ESP_LOGI(TAG, "-----|-------|--------|--------|--------|--------|"
                   "-----|-------|--------|--------|--------|--------|"
-                  "-----|--------|--------|--------|--------|-------|-------|----|----|");
+                  "-----|-----------|-----------|-----------|-----------|-------|-------|----|----|");
 #endif
 }
 
@@ -339,7 +339,7 @@ void tic_stats_print(const tic_stats_t *stats, const tic_cpu_stats_t *cpu_stats)
 #else
     ESP_LOGI(TAG, "%5lu|%7.2f|%8.3f|%8.3f|%8.3f|%8.3f|"
                   "%5lu|%7.2f|%8.3f|%8.3f|%8.3f|%8.3f|"
-                  "%5lu|%8.3f|%8.3f|%8.3f|%8.3f|%7lu|%7lu|%4.0f|%4.0f",
+                  "%5lu|%11.3f|%11.3f|%11.3f|%11.3f|%7lu|%7lu|%4.0f|%4.0f",
              (unsigned long)stats->ch_a.edge_count, a_hz, a_min, a_avg, a_max, a_std,
              (unsigned long)stats->ch_b.edge_count, b_hz, b_min, b_avg, b_max, b_std,
              (unsigned long)stats->delay.count, d_min, d_avg, d_max, d_std,
