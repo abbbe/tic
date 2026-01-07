@@ -127,9 +127,15 @@ void app_main(void)
     // Initialize the streaming edge matcher
     tic_matcher_init(&s_matcher, resolution);
 
-    // Max delay for matching: use half period of expected signal (conservative estimate)
-    // For unknown signals, use a large default (e.g., 1ms = 1,000,000 ns)
-    double max_delay_ns = 1000000.0;  // 1ms default
+    // Max delay for matching: use half period of expected signal
+    // This ensures wrong pairings (off by one cycle) are rejected
+#if CONFIG_TIC_SIGGEN_A_FREQ_HZ > 0
+    double max_delay_ns = 0.5e9 / CONFIG_TIC_SIGGEN_A_FREQ_HZ;
+#elif CONFIG_TIC_EXPECTED_FREQ_HZ > 0
+    double max_delay_ns = 0.5e9 / CONFIG_TIC_EXPECTED_FREQ_HZ;
+#else
+    #error "No signal frequency configured - set TIC_SIGGEN_A_FREQ_HZ or TIC_EXPECTED_FREQ_HZ"
+#endif
 
     while (1) {
         EventBits_t bits = xEventGroupWaitBits(

@@ -41,6 +41,7 @@ idf.py build flash monitor
 | `TIC_SIGGEN_B_FREQ_HZ` | 1000 | Generator B frequency (0=disable) |
 | `TIC_SIGGEN_B_GPIO` | 7 | Generator B output |
 | `TIC_SIGGEN_B_DELAY_NS` | 0 | Generator B relative delay (ns) |
+| `TIC_EXPECTED_FREQ_HZ` | 0 | Expected frequency for external inputs |
 | `TIC_MAX_BUFFER_SIZE` | 8192 | Max events per buffer |
 | `TIC_EDGES_PER_BUFFER` | 8192 | Buffer swap threshold |
 | `TIC_STATS_PERIOD_MS` | 1000 | Max time between stats (ms) |

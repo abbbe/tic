@@ -56,6 +56,16 @@ menu "TIC Configuration"
                 Positive = B lags A, Negative = B leads A.
     endmenu
 
+    config TIC_EXPECTED_FREQ_HZ
+        int "Expected signal frequency (Hz) for external inputs"
+        default 0
+        range 0 1000000
+        help
+            Expected frequency of external input signals.
+            Used to calculate max_delay for edge matching when
+            internal signal generators are disabled.
+            Set to 0 if using internal signal generators.
+
     config TIC_MAX_BUFFER_SIZE
         int "Maximum buffer size (events)"
         default 8192
