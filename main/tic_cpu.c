@@ -50,10 +50,11 @@ void tic_cpu_init(void)
 
 void tic_cpu_get_stats(tic_cpu_stats_t *stats, bool reset)
 {
-    uint32_t t0 = s_tick_count[0];
-    uint32_t t1 = s_tick_count[1];
+    // Read idle first, then tick - ensures idle <= tick even if tick occurs between reads
     uint32_t i0 = s_idle_count[0];
     uint32_t i1 = s_idle_count[1];
+    uint32_t t0 = s_tick_count[0];
+    uint32_t t1 = s_tick_count[1];
 
     // Utilization = 100 - idle_percent
     float idle0 = (t0 > 0) ? (100.0f * i0 / t0) : 100.0f;
