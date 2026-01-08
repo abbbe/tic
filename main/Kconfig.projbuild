@@ -99,4 +99,66 @@ menu "TIC Configuration"
             Enables high-throughput streaming to host for external processing.
             Serial console output (UART) remains active for debugging.
 
+    menu "WiFi MQTT Transport"
+        config TIC_WIFI_ENABLED
+            bool "Enable WiFi MQTT transport"
+            default n
+            help
+                Stream binary frames over WiFi/MQTT instead of (or in addition to) USB CDC.
+                Useful for ESP32-C6 which lacks USB OTG.
+
+        config TIC_WIFI_SSID
+            string "WiFi SSID"
+            depends on TIC_WIFI_ENABLED
+            default "your_wifi_ssid"
+            help
+                WiFi network name to connect to.
+
+        config TIC_WIFI_PASSWORD
+            string "WiFi Password"
+            depends on TIC_WIFI_ENABLED
+            default "your_wifi_password"
+            help
+                WiFi network password.
+
+        config TIC_MQTT_BROKER
+            string "MQTT Broker IP/hostname"
+            depends on TIC_WIFI_ENABLED
+            default "192.168.1.100"
+            help
+                MQTT broker address for publishing frames.
+
+        config TIC_MQTT_PORT
+            int "MQTT Broker Port"
+            depends on TIC_WIFI_ENABLED
+            default 1883
+            range 1 65535
+            help
+                MQTT broker port number.
+
+        config TIC_MQTT_TOPIC
+            string "MQTT Topic prefix"
+            depends on TIC_WIFI_ENABLED
+            default "tic"
+            help
+                MQTT topic prefix. Device name will be appended: <prefix>/<device>/frames
+
+        config TIC_DEVICE_NAME
+            string "Device name for MQTT topic"
+            depends on TIC_WIFI_ENABLED
+            default "tic"
+            help
+                Device identifier used in MQTT topic: tic/<device>/frames
+
+        config TIC_WIFI_RING_SIZE
+            int "Frame ring buffer size"
+            depends on TIC_WIFI_ENABLED
+            default 20
+            range 5 50
+            help
+                Number of frames to buffer when WiFi/MQTT is temporarily unavailable.
+                Each frame is ~8KB, so 20 frames = ~160KB.
+                Provides ~10 seconds of buffering at 2Hz frame rate.
+    endmenu
+
 endmenu

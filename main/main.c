@@ -14,6 +14,9 @@
 #if CONFIG_TIC_OUTPUT_BINARY
 #include "tic_serial.h"
 #endif
+#if CONFIG_TIC_WIFI_ENABLED
+#include "tic_wifi.h"
+#endif
 
 static const char *TAG = "tic_main";
 
@@ -42,7 +45,17 @@ void app_main(void)
 #if CONFIG_TIC_OUTPUT_BINARY
     // Initialize USB CDC for binary output
     tic_serial_init();
-    ESP_LOGI(TAG, "Binary output mode enabled");
+    ESP_LOGI(TAG, "Binary output mode enabled (USB CDC)");
+#endif
+
+#if CONFIG_TIC_WIFI_ENABLED
+    // Initialize WiFi MQTT transport
+    ret = tic_wifi_init();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to initialize WiFi transport");
+        return;
+    }
+    ESP_LOGI(TAG, "WiFi MQTT transport enabled");
 #endif
 
     // Initialize CPU idle time measurement
@@ -199,8 +212,8 @@ void app_main(void)
             tic_cpu_stats_t cpu_stats;
             tic_cpu_get_stats(&cpu_stats, true);
 
-#if CONFIG_TIC_OUTPUT_BINARY
-            // Binary output mode: send matched pairs with stats via USB CDC
+#if CONFIG_TIC_OUTPUT_BINARY || CONFIG_TIC_WIFI_ENABLED
+            // Get matched pairs for binary/WiFi output
             const tic_matched_pair_t *pairs;
             uint16_t pair_count;
             uint32_t edges_a, edges_b;
@@ -211,7 +224,15 @@ void app_main(void)
             stats.ch_a.edge_count = edges_a;
             stats.ch_b.edge_count = edges_b;
 
+#if CONFIG_TIC_OUTPUT_BINARY
+            // Send via USB CDC
             tic_serial_send_frame(pairs, pair_count, &stats, &cpu_stats, resolution, base_ts, overrun);
+#endif
+
+#if CONFIG_TIC_WIFI_ENABLED
+            // Send via WiFi MQTT
+            tic_wifi_send_frame(pairs, pair_count, &stats, &cpu_stats, resolution, base_ts, overrun);
+#endif
 #endif
 
             // Print stats (CSV output to console)

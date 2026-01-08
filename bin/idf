@@ -19,6 +19,7 @@
 #   -b, --build-dir DIR - Custom build directory (default: build/<mode>)
 #   --csv               - Enable CSV output format
 #   --binary            - Enable binary USB CDC output
+#   --wifi              - Enable WiFi MQTT transport
 #   --no-reset          - Don't reset on monitor
 #
 # Targets:
@@ -74,6 +75,7 @@ DO_MONITOR=false
 NO_RESET=false
 CSV_OUTPUT=false
 BINARY_OUTPUT=false
+WIFI_OUTPUT=false
 MODE="normal"
 FREQ_HZ=2000
 FREQ_B_HZ=""
@@ -126,6 +128,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --binary)
             BINARY_OUTPUT=true
+            shift
+            ;;
+        --wifi)
+            WIFI_OUTPUT=true
             shift
             ;;
         -b|--build-dir)
@@ -233,6 +239,7 @@ echo "=== TIC Build Helper ==="
 echo "Target: $IDF_TARGET"
 echo "Mode: $MODE"
 [[ "$BINARY_OUTPUT" == true ]] && echo "Binary USB CDC: enabled"
+[[ "$WIFI_OUTPUT" == true ]] && echo "WiFi MQTT: enabled"
 [[ -n "$DEVICE_CONFIG" ]] && echo "Device config: $DEVICE_CONFIG"
 echo "Build dir: $BUILD_DIR"
 if [[ -n "$FREQ_B_HZ" ]]; then
@@ -296,6 +303,13 @@ if [[ "$DO_BUILD" == true ]]; then
         rm -f "$BUILD_DIR/CMakeCache.txt"
     fi
 
+    # Check if wifi defaults changed (when wifi mode enabled)
+    if [[ "$WIFI_OUTPUT" == true && -f "sdkconfig.defaults.wifi" && -f "$BUILD_DIR/sdkconfig" && "sdkconfig.defaults.wifi" -nt "$BUILD_DIR/sdkconfig" ]]; then
+        echo "sdkconfig.defaults.wifi changed, forcing rebuild..."
+        rm -f "$BUILD_DIR/sdkconfig"
+        rm -f "$BUILD_DIR/CMakeCache.txt"
+    fi
+
     # Check if device-specific defaults changed
     if [[ -n "$DEVICE_CONFIG" && -f "$BUILD_DIR/sdkconfig" && "$DEVICE_CONFIG" -nt "$BUILD_DIR/sdkconfig" ]]; then
         echo "$DEVICE_CONFIG changed, forcing rebuild..."
@@ -310,9 +324,10 @@ if [[ "$DO_BUILD" == true ]]; then
         rm -f "$BUILD_DIR/CMakeCache.txt"
     fi
 
-    # Build SDKCONFIG_DEFAULTS chain: base -> mode -> [binary] -> [device] -> runtime
+    # Build SDKCONFIG_DEFAULTS chain: base -> mode -> [binary] -> [wifi] -> [device] -> runtime
     DEFAULTS_CHAIN="sdkconfig.defaults;sdkconfig.defaults.$MODE"
     [[ "$BINARY_OUTPUT" == true ]] && DEFAULTS_CHAIN+=";sdkconfig.defaults.binary"
+    [[ "$WIFI_OUTPUT" == true && -f "sdkconfig.defaults.wifi" ]] && DEFAULTS_CHAIN+=";sdkconfig.defaults.wifi"
     [[ -n "$DEVICE_CONFIG" ]] && DEFAULTS_CHAIN+=";$DEVICE_CONFIG"
     DEFAULTS_CHAIN+=";$SDKCONFIG_FILE"
 
