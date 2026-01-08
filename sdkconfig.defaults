@@ -1,3 +1,0 @@
-# TIC default configuration
-# Mode-specific overrides are in build/<mode>/sdkconfig.<mode>
-CONFIG_IDF_TARGET="esp32s3"

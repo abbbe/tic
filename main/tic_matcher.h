@@ -1,7 +1,7 @@
 #pragma once
 
 #include "tic_stats.h"
-#include "tic_serial.h"  // for tic_matched_pair_t
+#include "tic_types.h"
 #include "sdkconfig.h"
 #include <stdint.h>
 #include <stdbool.h>

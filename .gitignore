@@ -14,8 +14,8 @@ managed_components/
 # macOS
 .DS_Store
 
-# Environment
+# Local Config File
 .env
 
-# Test logs
-test/logs/
+# Python Virtual Env
+**/.venv

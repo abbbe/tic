@@ -53,8 +53,11 @@ source "$PROJECT_DIR/.env"
 # Expand $HOME in IDF_PATH
 eval IDF_PATH="$IDF_PATH"
 
-# Target chip
-IDF_TARGET=esp32s3
+# Validate IDF_TARGET
+if [[ -z "$IDF_TARGET" ]]; then
+    echo "ERROR: IDF_TARGET not set in .env" >&2
+    exit 1
+fi
 
 # ESP-IDF export script
 ESP_IDF_EXPORT="$IDF_PATH/export.sh"
@@ -227,6 +230,7 @@ fi
 SDKCONFIG_FILE="$BUILD_DIR/sdkconfig.$MODE"
 
 echo "=== TIC Build Helper ==="
+echo "Target: $IDF_TARGET"
 echo "Mode: $MODE"
 [[ "$BINARY_OUTPUT" == true ]] && echo "Binary USB CDC: enabled"
 [[ -n "$DEVICE_CONFIG" ]] && echo "Device config: $DEVICE_CONFIG"

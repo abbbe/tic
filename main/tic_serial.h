@@ -2,6 +2,7 @@
 
 #include "tic_capture.h"
 #include "tic_stats.h"
+#include "tic_types.h"
 #include <stdint.h>
 #include <stddef.h>
 #include <stdbool.h>
@@ -11,12 +12,6 @@
 
 // Frame flags
 #define TIC_FRAME_FLAG_OVERFLOW  (1 << 0)  // Buffer overflow occurred
-
-// Matched pair structure (8 bytes)
-typedef struct __attribute__((packed)) {
-    uint32_t ts_a;    // Channel A timestamp (32-bit, relative to base_ts)
-    uint32_t ts_b;    // Channel B timestamp (32-bit, relative to base_ts)
-} tic_matched_pair_t;
 
 // Binary frame header (74 bytes)
 // Frame format: header (74) + pairs (N*8) + crc32 (4)
