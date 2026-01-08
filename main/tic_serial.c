@@ -3,7 +3,7 @@
 #include "esp_crc.h"
 #include "esp_mac.h"
 #include "tinyusb.h"
-#include "tusb_cdc_acm.h"
+#include "tinyusb_cdc_acm.h"
 #include "class/cdc/cdc_device.h"  // for tud_cdc_connected()
 #include "sdkconfig.h"
 #include <string.h>
