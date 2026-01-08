@@ -10,7 +10,8 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-source "$SCRIPT_DIR/.env"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+source "$PROJECT_DIR/.env"
 
 NUM_TESTS=100
 
@@ -44,7 +45,7 @@ rand_range() {
 
 # Function to generate random number with logarithmic distribution
 rand_log() {
-    "$SCRIPT_DIR/.venv/bin/python3" "$SCRIPT_DIR/rand_log.py" "$1" "$2" --int
+    "$PROJECT_DIR/.venv/bin/python3" "$SCRIPT_DIR/rand_log.py" "$1" "$2" --int
 }
 
 echo "=== TIC Meta-Test (Dual Device) ==="
@@ -71,7 +72,7 @@ for i in $(seq 1 $NUM_TESTS); do
 
     # Build and flash both devices
     echo "  Building & flashing..."
-    if ! "$SCRIPT_DIR/bin/idf" -b "$LOG_DIR/build" -f $FREQ -d $DELAY --csv build flash tic2 tic3 > "$LOG_DIR/build_$(printf '%03d' $i).log" 2>&1; then
+    if ! "$PROJECT_DIR/bin/idf" -b "$LOG_DIR/build" -f $FREQ -d $DELAY --csv build flash tic2 tic3 > "$LOG_DIR/build_$(printf '%03d' $i).log" 2>&1; then
         echo "  FAIL: Build/flash failed"
         echo "$i,FAIL,$FREQ,$DELAY,,," >> "$RESULTS_CSV_D1"
         echo "$i,FAIL,$FREQ,$DELAY,,," >> "$RESULTS_CSV_D2"
@@ -87,12 +88,14 @@ for i in $(seq 1 $NUM_TESTS); do
     # Write test parameters to log
     echo "Test $i: freq=${FREQ}Hz delay=${DELAY}ns" > "$TEST_LOG"
 
-    CSV_ROWS=$("$SCRIPT_DIR/.venv/bin/python3" "$SCRIPT_DIR/tic_multi_reader.py" \
+    CSV_ROWS=$("$PROJECT_DIR/.venv/bin/python3" "$SCRIPT_DIR/tic_multi_reader.py" \
         --ports "$TIC2_SERIAL_PORT,$TIC3_SERIAL_PORT" \
         --samples 100 \
         --skip-samples 1 \
         --expected-freq "$FREQ" \
         --freq-tolerance-ppm 1000 \
+        --expected-delay "$DELAY" \
+        --delay-tolerance 12.5 \
         --raw-log-prefix "$RAW_LOG_PREFIX" \
         --csv-rows \
         2>>"$TEST_LOG") && STATUS="PASS" || STATUS="FAIL"

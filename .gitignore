@@ -11,5 +11,10 @@ build/
 # macOS
 .DS_Store
 
+# Environment
+.env
+
 # Test logs
 test/logs/
+managed_components/
+.cache/

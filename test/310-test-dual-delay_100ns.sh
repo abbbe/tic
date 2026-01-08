@@ -13,20 +13,23 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-source "$SCRIPT_DIR/.env"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+source "$PROJECT_DIR/.env"
 
 # Build and flash both devices
-"$SCRIPT_DIR/bin/idf" -f 2000 -d 100 build flash tic1 tic2
+"$PROJECT_DIR/bin/idf" -f 2000 -d 100 --csv build flash tic2 tic3
 
 # Validate
 echo ""
 echo "=== Running validation ==="
-"$SCRIPT_DIR/.venv/bin/python3" "$SCRIPT_DIR/tic_multi_reader.py" \
-    --ports "$TIC1_SERIAL_PORT,$TIC2_SERIAL_PORT" \
+"$PROJECT_DIR/.venv/bin/python3" "$SCRIPT_DIR/tic_multi_reader.py" \
+    --ports "$TIC2_SERIAL_PORT,$TIC3_SERIAL_PORT" \
     --samples 15 \
     --skip-samples 3 \
     --expected-freq 2000 \
-    --freq-tolerance-ppm 100
+    --freq-tolerance-ppm 100 \
+    --expected-delay 100 \
+    --delay-tolerance 12.5
 
 echo ""
 echo "=== Test complete ==="

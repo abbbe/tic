@@ -4,29 +4,13 @@ Automated tests for validating TIC functionality.
 
 ## Setup
 
-1. Create Python virtual environment:
+1. Follow the setup instructions in the main [README.md](../README.md) to configure `.env`
+
+2. Create Python virtual environment (in project root dir) and install required modules:
    ```bash
    python3 -m venv .venv
    source .venv/bin/activate
-   pip install -r requirements.txt
-   ```
-
-2. Create `.env` from sample:
-   ```bash
-   cp .env.sample .env
-   ```
-
-3. Edit `.env` with your settings:
-   ```bash
-   # Find your ports
-   ls /dev/tty.usb*      # macOS
-   ls /dev/ttyUSB*       # Linux
-
-   # Edit .env
-   IDF_PATH="$HOME/esp/esp-idf"
-   TIC1_SERIAL_PORT=/dev/tty.usbserial-0001
-   TIC2_SERIAL_PORT=/dev/tty.usbserial-0002  # for multi-device tests
-   TIC3_SERIAL_PORT=/dev/tty.usbserial-0003  # for multi-device tests
+   pip install -r test/requirements.txt
    ```
 
 ## Test Organization
@@ -35,28 +19,9 @@ Automated tests for validating TIC functionality.
 |--------|------|--------|-------------|
 | 1xx | Loopback | None (internal) | Gen GPIO = Capture GPIO |
 | 2xx | External | Single device | GPIO 6→4, 7→5 via wires |
-| 3xx | Dual-device | 2 devices | Cross-device measurements |
-| 4xx | Multi-device | 3 devices | Cross-device measurements |
-
-## Build Helper
-
-Use `bin/idf` for building and flashing:
-
-```bash
-./bin/idf --help                          # Show usage
-./bin/idf build                           # Build normal mode (external wiring)
-./bin/idf build flash tic1                # Build and flash TIC1
-./bin/idf -m loopback build tic1          # Build loopback mode
-./bin/idf -f 5000 -d 100 build            # Custom freq/delay
-./bin/idf monitor tic1                    # Monitor single device
-./bin/idf monitor all                     # Monitor all in tmux
-```
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `-f`, `--freq` | 2000 | Signal generator frequency (Hz) |
-| `-d`, `--delay` | 0 | Channel B delay (ns) |
-| `-m`, `--mode` | normal | Build mode: `normal` or `loopback` |
+| 3xx | Dual-sync | 2 devices | Each TIC captures both channels from peer |
+| 4xx | Dual-async | 2 devices (tic4, tic5) | Each TIC captures one channel from self, one from peer |
+| 9xx | Multi-device | 3 devices | Cross-device measurements (NOT IMPLEMENTED) |
 
 ## 1xx - Loopback Tests
 
@@ -92,7 +57,7 @@ Random parameter stress test (100 iterations).
 
 - Frequency range: 1.5-50 kHz
 - Delay range: 0 to period/4
-- Logs results to `logs/<timestamp>/`
+- Logs results to `logs/120_<timestamp>/`
 
 ## 2xx - External Wiring Tests (Single Device)
 
@@ -143,11 +108,11 @@ Device.GPIO notation: D1.4 = Device 1, GPIO 4
 + Common GND between devices
 ```
 
-Each device measures the other's signal generator output.
+Each device measures the other's signal generator outputs. There is a skew between TIC analysing the signal, but the pair of channel is in sync with each other.
 
-### 300-test-dual.sh
-
+### 300-test-dual.sh (synched)
 Cross-device frequency measurement at 2 kHz, zero delay.
+Each TIC sees both channels coming form another TIC.
 
 **Configuration:**
 - Capture A: GPIO 4, Capture B: GPIO 5
@@ -164,16 +129,44 @@ Cross-device frequency measurement at 2 kHz, zero delay.
 Cross-device frequency measurement at 2 kHz, 100ns delay.
 
 **Configuration:**
-- Capture A: GPIO 4, Capture B: GPIO 5
-- Gen A: GPIO 6, Gen B: GPIO 7
-- Frequency: 2000 Hz
-- Delay B-A: 100 ns
+Same as above, but 100ns delay.
 
 **Pass criteria:**
 - All frequencies within 100 ppm of expected
 - Low delay jitter (stddev)
 
-## 4xx - Multi-Device Tests
+## 4xx - Dual-Device Async Tests
+
+Requires 2 TIC devices with asymmetric cross-wiring. Each device captures one channel from its own generator (loopback) and one channel from the peer's generator (cross).
+
+### Wiring Topology
+
+```
+Device.GPIO notation: D4.4 = Device 4, GPIO 4
+
+  4.4 ← 4.6    D4 Gen A → D4 Cap A (loopback)
+  5.4 ← 5.6    D5 Gen A → D5 Cap B (loopback)
+  5.5 ← 4.7    D4 Gen B → D5 Cap B (cross)
+  4.5 ← 5.7    D5 Gen B → D4 Cap B (cross)
+
++ Common GND between devices
+```
+
+**Key difference from 3xx:** Each device sees a signal from another device. Another device's generator has different offset and oscillator, which can also drift. So the measured delay is arbitrary and will drift over time.
+
+### 400-test-async.sh
+
+Async cross-device frequency measurement at 2 kHz.
+
+**Pass criteria:**
+- All frequencies within 100 ppm of expected
+- Delay is NOT validated
+
+**Pass criteria:**
+- All frequencies within 100 ppm of expected
+- Delay is NOT validated
+
+## 9xx - Multi-Device Tests (NOT IMPLEMENTED YET)
 
 Requires 3 TIC devices with cross-wiring.
 
@@ -192,19 +185,12 @@ Device.GPIO notation: D1.4 = Device 1, GPIO 4
 + Common GND between all devices
 ```
 
-### 400-test-multi.sh
-
-Cross-device frequency measurement at 2 kHz.
-
-**Pass criteria:**
-- All frequencies within 100 ppm of expected
-- Low delay jitter (stddev)
 
 ## Python Tools
 
 ### tic_reader.py
 
-Single-device serial reader and validator.
+Single-device serial reader and validator. Only reads stats from the serial console, not the high-volume USB CDC output.
 
 ```bash
 python tic_reader.py --port /dev/ttyUSB0 --duration 5 \
@@ -243,7 +229,7 @@ Multi-device parallel reader for 3xx and 4xx tests.
 
 ```bash
 python tic_multi_reader.py --ports /dev/ttyUSB0,/dev/ttyUSB1 \
-    --samples 10 --expected-freq 2000
+    --samples 10 --expected-freq 2000 --expected-delay 0
 ```
 
 | Option | Default | Description |
@@ -253,6 +239,8 @@ python tic_multi_reader.py --ports /dev/ttyUSB0,/dev/ttyUSB1 \
 | `--skip-samples` | 3 | Skip initial samples (startup noise) |
 | `--expected-freq` | 2000 | Expected frequency (Hz) |
 | `--freq-tolerance-ppm` | 100 | Frequency tolerance (ppm) |
+| `--expected-delay` | (none) | Expected delay B-A in ns (if set, validates delay) |
+| `--delay-tolerance` | 12.5 | Delay tolerance in ns |
 | `--output` | (none) | Save raw data to CSV file |
 
 ## Exit Codes

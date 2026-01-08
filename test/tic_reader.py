@@ -39,6 +39,8 @@ class TicRow:
     d_std_ns: float
     d_miss_a: int
     d_miss_b: int
+    cpu0: float
+    cpu1: float
 
 
 def parse_csv_line(line: str) -> Tuple[Optional[int], Optional[TicRow]]:
@@ -60,7 +62,7 @@ def parse_csv_line(line: str) -> Tuple[Optional[int], Optional[TicRow]]:
         return seq, None
 
     parts = rest.split(',')
-    if len(parts) != 19:
+    if len(parts) != 21:
         return None, None
 
     try:
@@ -85,6 +87,8 @@ def parse_csv_line(line: str) -> Tuple[Optional[int], Optional[TicRow]]:
             d_std_ns=float(parts[16]),
             d_miss_a=int(parts[17]),
             d_miss_b=int(parts[18]),
+            cpu0=float(parts[19]),
+            cpu1=float(parts[20]),
         )
     except (ValueError, IndexError):
         return None, None

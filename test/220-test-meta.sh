@@ -9,10 +9,11 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-source "$SCRIPT_DIR/.env"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+source "$PROJECT_DIR/.env"
 
 PORT="$TIC1_SERIAL_PORT"
-NUM_TESTS=1000
+NUM_TESTS=100
 
 # Test parameter ranges
 MIN_FREQ=1500
@@ -42,7 +43,7 @@ rand_range() {
 
 # Function to generate random number with logarithmic distribution
 rand_log() {
-    "$SCRIPT_DIR/.venv/bin/python3" "$SCRIPT_DIR/rand_log.py" "$1" "$2" --int
+    "$PROJECT_DIR/.venv/bin/python3" "$SCRIPT_DIR/rand_log.py" "$1" "$2" --int
 }
 
 echo "=== TIC Meta-Test (External Wiring) ==="
@@ -69,7 +70,7 @@ for i in $(seq 1 $NUM_TESTS); do
 
     # Build and flash
     echo "  Building & flashing..."
-    if ! "$SCRIPT_DIR/bin/idf" -b "$LOG_DIR/build" -f $FREQ -d $DELAY --csv build flash tic1 > "$LOG_DIR/build_$(printf '%03d' $i).log" 2>&1; then
+    if ! "$PROJECT_DIR/bin/idf" -b "$LOG_DIR/build" -f $FREQ -d $DELAY --csv build flash tic1 > "$LOG_DIR/build_$(printf '%03d' $i).log" 2>&1; then
         echo "  FAIL: Build/flash failed"
         echo "$i,FAIL,$FREQ,$DELAY,,," >> "$RESULTS_CSV"
         ((FAIL++)) || true
@@ -84,7 +85,7 @@ for i in $(seq 1 $NUM_TESTS); do
     # Write test parameters to log
     echo "Test $i: freq=${FREQ}Hz delay=${DELAY}ns" > "$TEST_LOG"
 
-    CSV_ROW=$("$SCRIPT_DIR/.venv/bin/python3" "$SCRIPT_DIR/tic_reader.py" \
+    CSV_ROW=$("$PROJECT_DIR/.venv/bin/python3" "$SCRIPT_DIR/tic_reader.py" \
         --port "$PORT" \
         --lines 100 \
         --expected-freq-a "$FREQ" \

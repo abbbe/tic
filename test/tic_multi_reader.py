@@ -44,6 +44,8 @@ class TicRow:
     d_std_ns: float
     d_miss_a: int
     d_miss_b: int
+    cpu0: float
+    cpu1: float
 
 
 def parse_csv_line(line: str, device_id: int, timestamp: float) -> Tuple[Optional[int], Optional[TicRow]]:
@@ -65,7 +67,7 @@ def parse_csv_line(line: str, device_id: int, timestamp: float) -> Tuple[Optiona
         return seq, None
 
     parts = rest.split(',')
-    if len(parts) != 19:
+    if len(parts) != 21:
         return None, None
 
     try:
@@ -92,6 +94,8 @@ def parse_csv_line(line: str, device_id: int, timestamp: float) -> Tuple[Optiona
             d_std_ns=float(parts[16]),
             d_miss_a=int(parts[17]),
             d_miss_b=int(parts[18]),
+            cpu0=float(parts[19]),
+            cpu1=float(parts[20]),
         )
     except (ValueError, IndexError):
         return None, None
@@ -292,7 +296,9 @@ def analyze_results(
     non_csv_lines: Dict[int, List[str]],
     expected_freq: float,
     skip_samples: int,
-    freq_tolerance_ppm: float
+    freq_tolerance_ppm: float,
+    expected_delay: float = None,
+    delay_tolerance: float = 12.5
 ) -> bool:
     """Analyze and validate collected results."""
 
@@ -374,6 +380,13 @@ def analyze_results(
             print(f"  FAIL: Channel B frequency error {freq_b_err_ppm:.1f} ppm > {freq_tolerance_ppm} ppm", file=sys.stderr)
             ok = False
 
+        # Delay validation (if expected_delay is specified)
+        if expected_delay is not None:
+            delay_err = abs(avg_delay - expected_delay)
+            if delay_err > delay_tolerance:
+                print(f"  FAIL: Delay error {delay_err:.2f} ns > {delay_tolerance} ns (expected {expected_delay} ns, got {avg_delay:.2f} ns)", file=sys.stderr)
+                ok = False
+
     # Cross-device analysis
     if len(all_freqs_a) >= 2:
         print(f"\n{'='*60}", file=sys.stderr)
@@ -417,6 +430,10 @@ def main():
                         help='Expected frequency in Hz (default: 2000)')
     parser.add_argument('--freq-tolerance-ppm', type=float, default=100.0,
                         help='Frequency tolerance in ppm (default: 100)')
+    parser.add_argument('--expected-delay', type=float, default=None,
+                        help='Expected delay B-A in ns (default: None = no validation)')
+    parser.add_argument('--delay-tolerance', type=float, default=12.5,
+                        help='Delay tolerance in ns (default: 12.5)')
     parser.add_argument('--skip-samples', type=int, default=3,
                         help='Skip first N samples (startup transients, default: 3)')
     parser.add_argument('--quiet', '-q', action='store_true',
@@ -463,7 +480,9 @@ def main():
         non_csv_lines,
         args.expected_freq,
         args.skip_samples,
-        args.freq_tolerance_ppm
+        args.freq_tolerance_ppm,
+        args.expected_delay,
+        args.delay_tolerance
     )
 
     # Output CSV rows if requested (one per device)

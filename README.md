@@ -1,13 +1,13 @@
 # TIC - Time Interval Counter for ESP32-S3
 
-Dual-channel time interval counter using MCPWM capture. Measures signal period and inter-channel delay with 12.5ns resolution (80 MHz timer).
+Dual-channel time interval counter and generator based on ESP32 S3 MCPWM.
+Measures signal period and inter-channel delay with 12.5ns resolution.
 
 ## Features
 
 - **Dual channel capture** - Two independent input channels (A and B)
 - **Period statistics** - min/max/mean/stddev for each channel
 - **Relative delay** - B-A timing offset with matched-pair algorithm
-- **High throughput** - Up to 8192 edges per buffer, ISR-driven double buffering
 - **Dual signal generator** - Independent frequencies, configurable relative delay (ns)
 - **Auto loopback** - Internal loopback enabled when generator GPIO matches capture GPIO
 
@@ -20,7 +20,82 @@ Default GPIOs (configurable via menuconfig):
 - Capture: A=GPIO4, B=GPIO5
 - Signal generator: A=GPIO6, B=GPIO7
 
-## Build
+## Setup
+
+1. Create `.env` from sample:
+   ```bash
+   cp .env.sample .env
+   ```
+
+2. Edit `.env` with your settings:
+   ```bash
+   # Find your ports
+   ls /dev/tty.usb*      # macOS
+   ls /dev/ttyUSB*       # Linux
+
+   # Edit .env
+   IDF_PATH="$HOME/esp/esp-idf"
+   TIC1_SERIAL_PORT=/dev/tty.usbserial-0001
+   TIC2_SERIAL_PORT=/dev/tty.usbserial-0002  # for multi-device tests
+   TIC3_SERIAL_PORT=/dev/tty.usbserial-0003  # for multi-device tests
+   ```
+
+## Build Helper
+
+Use `bin/idf` for building and flashing with test configurations:
+
+```bash
+bin/idf --help                          # Show usage
+bin/idf build                           # Build normal mode (external wiring)
+bin/idf build flash tic1                # Build and flash TIC1
+bin/idf -m loopback build tic1          # Build loopback mode
+bin/idf -f 5000 -d 100 build            # Custom freq/delay
+bin/idf monitor tic1                    # Monitor single device
+bin/idf monitor all                     # Monitor all in tmux
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `-f`, `--freq` | 2000 | Signal generator frequency (Hz) |
+| `--freq-b` | same as --freq | Generator B frequency (Hz) |
+| `-d`, `--delay` | 0 | Channel B delay (ns) |
+| `-m`, `--mode` | normal | Build mode: `normal` or `loopback` |
+| `-b`, `--build-dir` | build/<mode> | Custom build directory |
+| `--csv` | off | Enable CSV output format |
+| `--binary` | off | Enable binary USB CDC output |
+| `--no-reset` | off | Don't reset on monitor |
+
+## Configuration
+
+The build system uses a chain of sdkconfig files that are merged in order (later files override earlier):
+
+```
+sdkconfig.defaults              # Base config (IDF target)
+    ↓
+sdkconfig.defaults.<mode>       # GPIO mappings (loopback or normal)
+    ↓
+sdkconfig.defaults.binary       # Binary mode settings (when --binary)
+    ↓
+build/<mode>/sdkconfig.<mode>   # Runtime values (freq, delay, CSV flag)
+```
+
+### Configuration Files
+
+| File | Contents |
+|------|----------|
+| `sdkconfig.defaults` | Base: IDF target (esp32s3) |
+| `sdkconfig.defaults.loopback` | GPIO 4,5 for both gen and capture |
+| `sdkconfig.defaults.normal` | GPIO 4,5 capture, 6,7 generator |
+| `sdkconfig.defaults.binary` | TinyUSB CDC, buffer sizes |
+
+### Mode GPIO Mappings
+
+| Mode | Capture A | Capture B | Gen A | Gen B | Wiring |
+|------|-----------|-----------|-------|-------|--------|
+| `loopback` | GPIO 4 | GPIO 5 | GPIO 4 | GPIO 5 | None (internal) |
+| `normal` | GPIO 4 | GPIO 5 | GPIO 6 | GPIO 7 | External wires |
+
+## Custom builds
 
 ```bash
 idf.py set-target esp32s3
@@ -28,9 +103,7 @@ idf.py menuconfig  # Optional: configure GPIOs and modes
 idf.py build flash monitor
 ```
 
-## Configuration
-
-`idf.py menuconfig` → TIC Configuration:
+In `idf.py menuconfig` → TIC Configuration:
 
 | Option | Default | Description |
 |--------|---------|-------------|
@@ -44,6 +117,9 @@ idf.py build flash monitor
 | `TIC_EXPECTED_FREQ_HZ` | 0 | Expected frequency for external inputs |
 | `TIC_BUFFER_SIZE` | 16384 | Events per buffer (swap when full) |
 | `TIC_STATS_PERIOD_MS` | 1000 | Max time between stats (ms) |
+
+TIC_EXPECTED_FREQ_HZ have to be set, it is used as a hint during inter-channel pulse matching.
+In loopback mode (when output matches input) half the generator period is used.
 
 ## Output
 

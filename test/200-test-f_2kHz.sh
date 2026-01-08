@@ -8,15 +8,16 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-source "$SCRIPT_DIR/.env"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+source "$PROJECT_DIR/.env"
 
 # Build and flash (normal mode = external wiring)
-"$SCRIPT_DIR/bin/idf" -f 2000 -d 0 build flash tic1
+"$PROJECT_DIR/bin/idf" -f 2000 -d 0 --csv build flash tic1
 
 # Validate
 echo ""
 echo "=== Running validation ==="
-"$SCRIPT_DIR/.venv/bin/python3" "$SCRIPT_DIR/tic_reader.py" \
+"$PROJECT_DIR/.venv/bin/python3" "$SCRIPT_DIR/tic_reader.py" \
     --port "$TIC1_SERIAL_PORT" \
     --duration 10 \
     --expected-freq-a 2000 \

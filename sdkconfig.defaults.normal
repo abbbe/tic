@@ -1,0 +1,5 @@
+# Normal mode: separate gen and capture GPIOs (for external wiring)
+CONFIG_TIC_INPUT_GPIO_A=4
+CONFIG_TIC_INPUT_GPIO_B=5
+CONFIG_TIC_SIGGEN_A_GPIO=6
+CONFIG_TIC_SIGGEN_B_GPIO=7

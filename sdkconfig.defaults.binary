@@ -1,0 +1,18 @@
+# Binary output mode configuration
+# Frequency and delay are set dynamically by bin/idf
+CONFIG_TIC_OUTPUT_BINARY=y
+CONFIG_TIC_OUTPUT_CSV=n
+CONFIG_TIC_BUFFER_SIZE=8192
+CONFIG_TIC_STATS_PERIOD_MS=1000
+
+# TinyUSB task configuration
+CONFIG_TINYUSB_TASK_STACK_SIZE=4096
+
+# TinyUSB CDC configuration
+CONFIG_TINYUSB_CDC_ENABLED=y
+CONFIG_TINYUSB_CDC_COUNT=1
+CONFIG_TINYUSB_CDC_RX_BUFSIZE=512
+CONFIG_TINYUSB_CDC_TX_BUFSIZE=512
+
+# Disable USB Serial JTAG secondary console (conflicts with TinyUSB)
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y

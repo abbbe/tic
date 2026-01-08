@@ -1,0 +1,5 @@
+# Loopback mode: gen GPIO = capture GPIO (no external wiring needed)
+CONFIG_TIC_INPUT_GPIO_A=4
+CONFIG_TIC_INPUT_GPIO_B=5
+CONFIG_TIC_SIGGEN_A_GPIO=4
+CONFIG_TIC_SIGGEN_B_GPIO=5
