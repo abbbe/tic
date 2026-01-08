@@ -1,5 +1,8 @@
-# Build output
+# Build artefacts
 build/
+**/__pycache__/
+managed_components/
+.cache/
 
 # IDE
 .vscode/
@@ -16,5 +19,3 @@ build/
 
 # Test logs
 test/logs/
-managed_components/
-.cache/

@@ -1,27 +1,53 @@
 #!/usr/bin/env python3
 """
-TIC multi-device reader - reads CSV output from multiple TIC devices in parallel.
+TIC multi-device validator - reads and validates data from multiple TIC devices in parallel.
+
+Supports two data sources:
+- Serial console (default): ESP32 UART CSV output
+- Binary mode: USB CDC binary frames via TICReader
 
 Usage:
-    python tic_multi_reader.py --ports /dev/ttyUSB0,/dev/ttyUSB1,/dev/ttyUSB2 \
+    # Serial console mode (default)
+    python tic_multi_validator.py --ports /dev/ttyUSB0,/dev/ttyUSB1,/dev/ttyUSB2 \
         --duration 30 --expected-freq 2000 --skip-samples 3
+
+    # Binary mode (via CLI flag)
+    python tic_multi_validator.py --binary --ports /dev/tty.usbmodem1,/dev/tty.usbmodem2 \
+        --duration 30 --expected-freq 2000 --skip-samples 3
+
+    # Binary mode (via TEST_BINARY=1 in .env)
+    TEST_BINARY=1 python tic_multi_validator.py --ports /dev/tty.usbmodem1,/dev/tty.usbmodem2 ...
 """
 
 import argparse
 import serial
 import sys
+import os
 import time
 import re
 import threading
 import queue
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Optional, List, Dict, Tuple
 from collections import defaultdict
+
+# Load .env from project root (parent of test/)
+try:
+    from dotenv import load_dotenv
+    env_path = Path(__file__).parent.parent / '.env'
+    if env_path.exists():
+        load_dotenv(env_path)
+except ImportError:
+    pass  # dotenv not installed, rely on system env vars
+
+# Add tools directory to path for TICReader import
+sys.path.insert(0, str(Path(__file__).parent.parent / 'tools'))
 
 
 @dataclass
 class TicRow:
-    """Parsed CSV row from TIC output."""
+    """Parsed data row - common format for serial and binary sources."""
     device_id: int
     seq: int
     timestamp: float  # When we received this row
@@ -101,6 +127,36 @@ def parse_csv_line(line: str, device_id: int, timestamp: float) -> Tuple[Optiona
         return None, None
 
 
+def frame_to_ticrow(frame, device_id: int, seq: int, timestamp: float) -> TicRow:
+    """Convert TICFrame (from binary reader) to TicRow."""
+    return TicRow(
+        device_id=device_id,
+        seq=seq,
+        timestamp=timestamp,
+        a_n=frame.edges_a,
+        a_hz=frame.period_a_hz,
+        a_min_us=frame.period_a_min_ns / 1000.0,
+        a_avg_us=frame.period_a_mean_ns / 1000.0,
+        a_max_us=frame.period_a_max_ns / 1000.0,
+        a_std_us=0.0,  # stddev not in binary header
+        b_n=frame.edges_b,
+        b_hz=frame.period_b_hz,
+        b_min_us=frame.period_b_min_ns / 1000.0,
+        b_avg_us=frame.period_b_mean_ns / 1000.0,
+        b_max_us=frame.period_b_max_ns / 1000.0,
+        b_std_us=0.0,  # stddev not in binary header
+        d_n=frame.pair_count,
+        d_min_ns=frame.delay_min_ns,
+        d_avg_ns=frame.delay_mean_ns,
+        d_max_ns=frame.delay_max_ns,
+        d_std_ns=frame.delay_stddev_ns,
+        d_miss_a=frame.miss_a,
+        d_miss_b=frame.miss_b,
+        cpu0=float(frame.cpu0_pct),
+        cpu1=float(frame.cpu1_pct),
+    )
+
+
 def reset_device(ser: serial.Serial) -> None:
     """Reset device via RTS (EN) while keeping DTR low (GPIO0 high for normal boot)."""
     ser.dtr = False  # GPIO0 high = normal boot (not download mode)
@@ -109,7 +165,7 @@ def reset_device(ser: serial.Serial) -> None:
     ser.rts = False  # EN high = run
 
 
-def device_reader(
+def device_reader_serial(
     device_id: int,
     port: str,
     baudrate: int,
@@ -119,7 +175,7 @@ def device_reader(
     quiet: bool = False,
     raw_log_file: Optional[str] = None
 ):
-    """Thread function to read from a single device."""
+    """Thread function to read from a single device via serial console."""
     raw_lines = []
     try:
         with serial.Serial(port, baudrate, timeout=1) as ser:
@@ -190,13 +246,76 @@ def device_reader(
                 f.writelines(raw_lines)
 
 
+def device_reader_binary(
+    device_id: int,
+    port: str,
+    data_queue: queue.Queue,
+    stop_event: threading.Event,
+    boot_event: threading.Event,
+    quiet: bool = False
+):
+    """Thread function to read from a single device via binary USB CDC."""
+    from tic_binary_reader import TICReader
+
+    seq = 0
+    try:
+        with TICReader(port, validate=True, timeout=5.0) as reader:
+            # Signal boot complete (binary mode doesn't have boot marker)
+            boot_event.set()
+            if not quiet:
+                print(f"  D{device_id}: Connected (binary mode)", file=sys.stderr)
+
+            while not stop_event.is_set():
+                try:
+                    result = reader.read_frame()
+                    if result is None:
+                        continue
+
+                    frame, frame_errors = result
+                    timestamp = time.time()
+                    seq += 1
+
+                    # Report validation errors
+                    for err in frame_errors:
+                        data_queue.put(('seq_error', device_id, err))
+
+                    # Report overflow
+                    if frame.overflow:
+                        data_queue.put(('error', device_id, f"OVERFLOW in frame {frame.seq}"))
+
+                    # Convert to TicRow and queue
+                    row = frame_to_ticrow(frame, device_id, seq, timestamp)
+                    data_queue.put(('row', device_id, row))
+
+                    if not quiet:
+                        print(f"  D{device_id} Frame{seq}: A={row.a_hz:.1f}Hz B={row.b_hz:.1f}Hz "
+                              f"delay={row.d_avg_ns:.1f}ns miss={row.d_miss_a}/{row.d_miss_b}",
+                              file=sys.stderr)
+
+                except TimeoutError:
+                    # Timeout reading frame, try again
+                    continue
+                except (serial.SerialException, OSError) as e:
+                    data_queue.put(('error', device_id, f"Serial error: {e}"))
+                    break
+
+            # Report CRC errors at end
+            vs = reader.validation_stats
+            if vs.crc_errors > 0:
+                data_queue.put(('error', device_id, f"CRC errors: {vs.crc_errors}"))
+
+    except Exception as e:
+        data_queue.put(('error', device_id, f"Binary reader error: {e}"))
+
+
 def collect_data(
     ports: List[str],
     baudrate: int,
     duration: float,
     max_samples: int,
     quiet: bool = False,
-    raw_log_prefix: Optional[str] = None
+    raw_log_prefix: Optional[str] = None,
+    binary_mode: bool = False
 ) -> Tuple[Dict[int, List[TicRow]], List[str], Dict[int, List[str]]]:
     """Collect data from multiple devices. Returns (device_rows, errors, non_csv_lines)."""
 
@@ -211,18 +330,25 @@ def collect_data(
     # Start reader threads
     threads = []
     for i, port in enumerate(ports):
-        raw_log_file = f"{raw_log_prefix}_d{i+1}.log" if raw_log_prefix else None
-        t = threading.Thread(
-            target=device_reader,
-            args=(i + 1, port, baudrate, data_queue, stop_event, boot_events[i], quiet, raw_log_file)
-        )
+        if binary_mode:
+            t = threading.Thread(
+                target=device_reader_binary,
+                args=(i + 1, port, data_queue, stop_event, boot_events[i], quiet)
+            )
+        else:
+            raw_log_file = f"{raw_log_prefix}_d{i+1}.log" if raw_log_prefix else None
+            t = threading.Thread(
+                target=device_reader_serial,
+                args=(i + 1, port, baudrate, data_queue, stop_event, boot_events[i], quiet, raw_log_file)
+            )
         t.daemon = True
         t.start()
         threads.append(t)
 
     # Wait for all devices to boot (with timeout)
     if not quiet:
-        print("Waiting for all devices to boot...", file=sys.stderr)
+        mode_str = "binary" if binary_mode else "serial"
+        print(f"Waiting for all devices to connect ({mode_str} mode)...", file=sys.stderr)
 
     boot_timeout = time.time() + 15.0
     while time.time() < boot_timeout:
@@ -239,7 +365,7 @@ def collect_data(
         return device_rows, errors, dict(non_csv_lines)
 
     if not quiet:
-        print("All devices booted, collecting data...", file=sys.stderr)
+        print("All devices connected, collecting data...", file=sys.stderr)
 
     # Collect data
     start_time = time.time()
@@ -417,7 +543,7 @@ def analyze_results(
 
 
 def main():
-    parser = argparse.ArgumentParser(description='TIC multi-device reader and validator')
+    parser = argparse.ArgumentParser(description='TIC multi-device validator')
     parser.add_argument('--ports', '-p', required=True,
                         help='Comma-separated list of serial ports')
     parser.add_argument('--baudrate', '-b', type=int, default=115200,
@@ -425,7 +551,7 @@ def main():
     parser.add_argument('--duration', '-d', type=float, default=0,
                         help='Read duration in seconds (default: 0 = use --samples)')
     parser.add_argument('--samples', '-n', type=int, default=10,
-                        help='Number of CSV samples per device (default: 10)')
+                        help='Number of data samples per device (default: 10)')
     parser.add_argument('--expected-freq', type=float, default=2000.0,
                         help='Expected frequency in Hz (default: 2000)')
     parser.add_argument('--freq-tolerance-ppm', type=float, default=100.0,
@@ -444,6 +570,8 @@ def main():
                         help='Prefix for raw serial log files (creates <prefix>_d1.log, <prefix>_d2.log, ...)')
     parser.add_argument('--csv-rows', action='store_true',
                         help='Output CSV rows to stdout (one per device): device,freq_a,freq_b,delay')
+    parser.add_argument('--binary', action='store_true',
+                        help='Use binary mode (USB CDC TICReader)')
 
     args = parser.parse_args()
 
@@ -451,7 +579,11 @@ def main():
     if len(ports) < 2:
         parser.error("Need at least 2 ports for multi-device test")
 
-    print(f"Reading from {len(ports)} devices: {ports}", file=sys.stderr)
+    # Check for binary mode from env if not specified on CLI
+    binary_mode = args.binary or os.environ.get('TEST_BINARY', '').lower() in ('1', 'true', 'yes')
+
+    mode_str = "binary" if binary_mode else "serial"
+    print(f"Reading from {len(ports)} devices ({mode_str} mode): {ports}", file=sys.stderr)
 
     device_rows, errors, non_csv_lines = collect_data(
         ports,
@@ -459,7 +591,8 @@ def main():
         args.duration,
         args.samples + args.skip_samples,  # Collect extra to account for skipping
         args.quiet,
-        args.raw_log_prefix
+        args.raw_log_prefix,
+        binary_mode
     )
 
     # Write raw data if requested
