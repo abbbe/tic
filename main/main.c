@@ -188,13 +188,7 @@ void app_main(void)
                 tic_matcher_timeout(&s_matcher, last_timestamp, max_delay_ns);
             }
 
-#if CONFIG_TIC_OUTPUT_BINARY
-            // Binary output mode: send raw events via USB CDC
-            // Stats will be computed by the Python reader on the host
-            tic_serial_send_frame(events, event_count, resolution, overrun);
-#endif
-
-            // Stats processing (for CSV output and matcher cleanup)
+            // Stats processing (for CSV output)
             tic_stats_t stats;
             tic_stats_process(events, event_count, resolution, &stats);
 
@@ -205,8 +199,21 @@ void app_main(void)
             tic_cpu_stats_t cpu_stats;
             tic_cpu_get_stats(&cpu_stats, true);
 
-            // Note: In binary mode, stats are NOT sent via CDC to avoid
-            // corrupting the binary stream. Host computes stats from raw edges.
+#if CONFIG_TIC_OUTPUT_BINARY
+            // Binary output mode: send matched pairs with stats via USB CDC
+            const tic_matched_pair_t *pairs;
+            uint16_t pair_count;
+            uint32_t edges_a, edges_b;
+            uint64_t base_ts;
+            tic_matcher_get_pairs(&s_matcher, &pairs, &pair_count, &edges_a, &edges_b, &base_ts);
+
+            // Use edge counts from matcher for accurate reporting
+            stats.ch_a.edge_count = edges_a;
+            stats.ch_b.edge_count = edges_b;
+
+            tic_serial_send_frame(pairs, pair_count, &stats, &cpu_stats, resolution, base_ts, overrun);
+#endif
+
             // Print stats (CSV output to console)
             tic_stats_print(&stats, &cpu_stats);
         }

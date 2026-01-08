@@ -1,8 +1,14 @@
 #pragma once
 
 #include "tic_stats.h"
+#include "tic_serial.h"  // for tic_matched_pair_t
+#include "sdkconfig.h"
 #include <stdint.h>
 #include <stdbool.h>
+
+// Maximum number of matched pairs per buffer
+// At most half of buffer events can be pairs (one A + one B = one pair)
+#define TIC_MAX_PAIRS (CONFIG_TIC_BUFFER_SIZE / 2)
 
 /**
  * @brief Streaming edge matcher for delay calculation
@@ -24,6 +30,9 @@ typedef struct {
     // Using extended 64-bit timestamps for overflow handling
     uint64_t pending_a;
     uint64_t pending_b;
+    // Raw 32-bit values for storing in pairs
+    uint32_t pending_a_raw;
+    uint32_t pending_b_raw;
 
     // Overflow tracking for timestamp extension
     uint32_t last_value_a;
@@ -42,6 +51,18 @@ typedef struct {
     double delay_max;
     uint32_t missed_a;
     uint32_t missed_b;
+
+    // Edge counts for this buffer
+    uint32_t edges_a;
+    uint32_t edges_b;
+
+    // Matched pairs storage
+    tic_matched_pair_t pairs[TIC_MAX_PAIRS];
+    uint16_t pair_count;
+
+    // Base timestamp for relative pair timestamps
+    uint64_t base_ts;
+    bool has_base_ts;
 } tic_matcher_t;
 
 /**
@@ -93,3 +114,17 @@ void tic_matcher_timeout(tic_matcher_t *m, uint64_t current_time, double max_age
  * @param reset If true, reset internal counters after copying
  */
 void tic_matcher_get_stats(tic_matcher_t *m, tic_delay_stat_t *stats, bool reset);
+
+/**
+ * @brief Get matched pairs and edge counts, then reset for next buffer
+ *
+ * @param m Matcher instance
+ * @param pairs Output: pointer to pairs array (valid until next call)
+ * @param pair_count Output: number of pairs
+ * @param edges_a Output: channel A edge count
+ * @param edges_b Output: channel B edge count
+ * @param base_ts Output: base timestamp for the pairs
+ */
+void tic_matcher_get_pairs(tic_matcher_t *m, const tic_matched_pair_t **pairs,
+                           uint16_t *pair_count, uint32_t *edges_a, uint32_t *edges_b,
+                           uint64_t *base_ts);

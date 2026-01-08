@@ -13,21 +13,6 @@ static const char *TAG = "tic_serial";
 // Frame sequence number
 static uint32_t s_seq = 0;
 
-// 64-bit timestamp extension
-static uint32_t s_last_raw_ts = 0;
-static uint64_t s_ts_high = 0;
-
-// Extend 32-bit timestamp to 64-bit, handling overflow
-static uint64_t extend_timestamp(uint32_t raw_ts)
-{
-    // Detect overflow: if new timestamp is much smaller than last
-    if (raw_ts < s_last_raw_ts && (s_last_raw_ts - raw_ts) > 0x80000000) {
-        s_ts_high += 0x100000000ULL;
-    }
-    s_last_raw_ts = raw_ts;
-    return s_ts_high | raw_ts;
-}
-
 void tic_serial_init(void)
 {
     ESP_LOGI(TAG, "Initializing USB CDC for binary output");
@@ -66,61 +51,68 @@ void tic_serial_init(void)
     ESP_LOGI(TAG, "USB CDC initialized");
 }
 
-void tic_serial_send_frame(const tic_event_t *events, size_t event_count,
-                           uint32_t resolution_hz, bool overflow)
+void tic_serial_send_frame(const tic_matched_pair_t *pairs, uint16_t pair_count,
+                           const tic_stats_t *stats, const tic_cpu_stats_t *cpu_stats,
+                           uint32_t resolution_hz, uint64_t base_ts, bool overflow)
 {
-    if (event_count == 0) {
-        return;
-    }
-
     // Don't send if host hasn't opened the CDC port
     if (!tud_cdc_connected()) {
         return;
     }
 
-    // Find first edge timestamp for 64-bit extension
-    uint64_t first_edge_ts = 0;
-    for (size_t i = 0; i < event_count; i++) {
-        if (events[i].type == TIC_EVENT_EDGE) {
-            first_edge_ts = extend_timestamp(events[i].value);
-            break;
-        }
-    }
-
-    // Build frame header
+    // Build frame header with embedded stats
     tic_frame_header_t header = {
         .magic = TIC_FRAME_MAGIC,
-        .version = 1,
-        .resolution_hz = resolution_hz,
         .seq = s_seq++,
-        .first_edge_ts = first_edge_ts,
-        .event_count = (uint16_t)event_count,
+        .resolution_hz = resolution_hz,
+        .base_ts = base_ts,
+        .pair_count = pair_count,
+        .edges_a = (uint16_t)stats->ch_a.edge_count,
+        .edges_b = (uint16_t)stats->ch_b.edge_count,
+        .miss_a = (uint16_t)stats->delay.missed_a,
+        .miss_b = (uint16_t)stats->delay.missed_b,
         .flags = overflow ? TIC_FRAME_FLAG_OVERFLOW : 0,
+        .delay_mean_ns = (float)stats->delay.mean_ns,
+        .delay_min_ns = (float)stats->delay.min_ns,
+        .delay_max_ns = (float)stats->delay.max_ns,
+        .delay_stddev_ns = (float)stats->delay.stddev_ns,
+        .cpu0_pct = cpu_stats ? (uint8_t)cpu_stats->util_pct_cpu0 : 0,
+        .cpu1_pct = cpu_stats ? (uint8_t)cpu_stats->util_pct_cpu1 : 0,
+        .period_a_mean_ns = (uint32_t)stats->ch_a.mean_ns,
+        .period_a_min_ns = (uint32_t)stats->ch_a.min_ns,
+        .period_a_max_ns = (uint32_t)stats->ch_a.max_ns,
+        .period_b_mean_ns = (uint32_t)stats->ch_b.mean_ns,
+        .period_b_min_ns = (uint32_t)stats->ch_b.min_ns,
+        .period_b_max_ns = (uint32_t)stats->ch_b.max_ns,
     };
 
-    // Calculate CRC32 over header + events
+    // Calculate CRC32 over header + pairs
     uint32_t crc = esp_crc32_le(0, (const uint8_t *)&header, sizeof(header));
-    crc = esp_crc32_le(crc, (const uint8_t *)events, event_count * sizeof(tic_event_t));
+    if (pair_count > 0) {
+        crc = esp_crc32_le(crc, (const uint8_t *)pairs, pair_count * sizeof(tic_matched_pair_t));
+    }
 
     // Send header
     tinyusb_cdcacm_write_queue(TINYUSB_CDC_ACM_0, (uint8_t *)&header, sizeof(header));
     tinyusb_cdcacm_write_flush(TINYUSB_CDC_ACM_0, pdMS_TO_TICKS(100));
 
-    // Send events in chunks to avoid overflowing the CDC TX FIFO
-    const size_t CHUNK_SIZE = 64;  // Events per chunk (512 bytes)
-    const uint8_t *event_data = (const uint8_t *)events;
-    size_t total_bytes = event_count * sizeof(tic_event_t);
-    size_t sent = 0;
+    // Send pairs in chunks to avoid overflowing the CDC TX FIFO
+    if (pair_count > 0) {
+        const size_t CHUNK_SIZE = 64;  // Pairs per chunk (512 bytes)
+        const uint8_t *pair_data = (const uint8_t *)pairs;
+        size_t total_bytes = pair_count * sizeof(tic_matched_pair_t);
+        size_t sent = 0;
 
-    while (sent < total_bytes) {
-        size_t chunk = total_bytes - sent;
-        if (chunk > CHUNK_SIZE * sizeof(tic_event_t)) {
-            chunk = CHUNK_SIZE * sizeof(tic_event_t);
+        while (sent < total_bytes) {
+            size_t chunk = total_bytes - sent;
+            if (chunk > CHUNK_SIZE * sizeof(tic_matched_pair_t)) {
+                chunk = CHUNK_SIZE * sizeof(tic_matched_pair_t);
+            }
+
+            tinyusb_cdcacm_write_queue(TINYUSB_CDC_ACM_0, pair_data + sent, chunk);
+            tinyusb_cdcacm_write_flush(TINYUSB_CDC_ACM_0, pdMS_TO_TICKS(100));
+            sent += chunk;
         }
-
-        tinyusb_cdcacm_write_queue(TINYUSB_CDC_ACM_0, event_data + sent, chunk);
-        tinyusb_cdcacm_write_flush(TINYUSB_CDC_ACM_0, pdMS_TO_TICKS(100));
-        sent += chunk;
     }
 
     // Send CRC32 at end of frame

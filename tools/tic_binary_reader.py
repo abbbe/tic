@@ -2,38 +2,49 @@
 """
 TIC Binary Serial Reader
 
-Reads binary edge timing data from the TIC (Time Interval Counter) ESP32 device
+Reads binary matched pair timing data from the TIC (Time Interval Counter) ESP32 device
 via USB CDC serial port.
 
 Binary Frame Format:
-    Header (28 bytes):
-        - magic:        uint32  "TIC1" = 0x31434954
-        - version:      uint32  Protocol version (1)
-        - resolution_hz: uint32  Timer resolution (80000000)
-        - seq:          uint32  Frame sequence number
-        - first_edge_ts: uint64  64-bit timestamp of first edge
-        - event_count:  uint16  Number of events
-        - flags:        uint16  Flags (bit 0 = overflow)
+    Header (74 bytes):
+        - magic:           uint32  "TIC1" = 0x31434954
+        - seq:             uint32  Frame sequence number
+        - resolution_hz:   uint32  Timer resolution (80000000)
+        - base_ts:         uint64  64-bit base timestamp
+        - pair_count:      uint16  Number of matched pairs
+        - edges_a:         uint16  Total channel A edges
+        - edges_b:         uint16  Total channel B edges
+        - miss_a:          uint16  Unmatched A edges
+        - miss_b:          uint16  Unmatched B edges
+        - flags:           uint16  Flags (bit 0 = overflow)
+        - delay_mean_ns:   int32   Mean delay (B-A) in ns
+        - delay_min_ns:    int32   Min delay in ns
+        - delay_max_ns:    int32   Max delay in ns
+        - delay_stddev_ns: int32   Stddev of delay in ns
+        - cpu0_pct:        uint8   CPU0 utilization %
+        - cpu1_pct:        uint8   CPU1 utilization %
+        - period_a_mean_ns: uint32  Channel A mean period in ns
+        - period_a_min_ns:  uint32  Channel A min period in ns
+        - period_a_max_ns:  uint32  Channel A max period in ns
+        - period_b_mean_ns: uint32  Channel B mean period in ns
+        - period_b_min_ns:  uint32  Channel B min period in ns
+        - period_b_max_ns:  uint32  Channel B max period in ns
 
-    Events (8 bytes each):
-        - type:         uint8   0=edge, 1=overflow
-        - channel:      uint8   0=A, 1=B
-        - reserved:     uint16
-        - value:        uint32  Capture timestamp (32-bit)
+    Matched Pairs (8 bytes each):
+        - ts_a:            uint32  Channel A timestamp
+        - ts_b:            uint32  Channel B timestamp
 
     CRC32 (4 bytes):
-        - crc32:        uint32  CRC32-LE over header + events (zlib compatible)
+        - crc32:           uint32  CRC32-LE over header + pairs (zlib compatible)
 
 Usage:
     # Read from TIC device
     reader = TICReader("/dev/tty.usbmodem3113101")
-    for frame, stats in reader.read_frames():
-        print(f"Frame {frame.seq}: {len(frame.events)} events")
-        if stats:
-            print(f"  Delay: {stats['d']['avg_ns']:.1f}ns")
+    for frame in reader.read_frames():
+        print(f"Frame {frame.seq}: {frame.pair_count} pairs, delay={frame.delay_mean_ns}ns")
 
     # Test mode (displays like ESP32 console)
-    python tic_reader.py --port /dev/tty.usbmodem3113101 --test
+    python tic_binary_reader.py --port /dev/tty.usbmodem3113101 --test
 """
 
 import struct
@@ -51,24 +62,22 @@ logger = logging.getLogger(__name__)
 # Frame magic: "TIC1" in little-endian
 TIC_FRAME_MAGIC = 0x31434954
 
-# Frame header format: magic(4) + version(4) + resolution(4) + seq(4) + first_edge_ts(8) + event_count(2) + flags(2)
-HEADER_FORMAT = '<IIIIQHH'
-HEADER_SIZE = struct.calcsize(HEADER_FORMAT)  # 28 bytes
+# Frame header format (74 bytes):
+# magic(4) + seq(4) + resolution(4) + base_ts(8) +
+# pair_count(2) + edges_a(2) + edges_b(2) + miss_a(2) + miss_b(2) + flags(2) +
+# delay_mean(4f) + delay_min(4f) + delay_max(4f) + delay_stddev(4f) +
+# cpu0(1) + cpu1(1) +
+# period_a_mean(4) + period_a_min(4) + period_a_max(4) +
+# period_b_mean(4) + period_b_min(4) + period_b_max(4)
+HEADER_FORMAT = '<IIIQHHHHHHffffbbIIIIII'
+HEADER_SIZE = struct.calcsize(HEADER_FORMAT)  # 74 bytes
 
-# Event format: type(1) + channel(1) + reserved(2) + value(4)
-EVENT_FORMAT = '<BBHI'
-EVENT_SIZE = struct.calcsize(EVENT_FORMAT)  # 8 bytes
+# Matched pair format: ts_a(4) + ts_b(4)
+PAIR_FORMAT = '<II'
+PAIR_SIZE = struct.calcsize(PAIR_FORMAT)  # 8 bytes
 
 # CRC32 size
 CRC_SIZE = 4
-
-# Event types
-TIC_EVENT_EDGE = 0
-TIC_EVENT_OVERFLOW = 1
-
-# Channels
-TIC_CHANNEL_A = 0
-TIC_CHANNEL_B = 1
 
 # Frame flags
 TIC_FRAME_FLAG_OVERFLOW = 1 << 0
@@ -80,46 +89,55 @@ class ValidationError(Exception):
 
 
 @dataclass
-class TICEvent:
-    """Single TIC event (edge or overflow)."""
-    type: int
-    channel: int
-    value: int
+class TICMatchedPair:
+    """Single matched pair (A edge + B edge)."""
+    ts_a: int
+    ts_b: int
 
-    @property
-    def is_edge(self) -> bool:
-        return self.type == TIC_EVENT_EDGE
-
-    @property
-    def is_overflow(self) -> bool:
-        return self.type == TIC_EVENT_OVERFLOW
-
-    @property
-    def channel_name(self) -> str:
-        return 'A' if self.channel == TIC_CHANNEL_A else 'B'
+    def delay_ns(self, resolution_hz: int) -> float:
+        """Calculate delay in nanoseconds (B - A)."""
+        return (self.ts_b - self.ts_a) * 1e9 / resolution_hz
 
 
 @dataclass
 class TICFrame:
-    """TIC frame containing events."""
-    version: int
-    resolution_hz: int
+    """TIC frame containing matched pairs and embedded stats."""
     seq: int
-    first_edge_ts: int
-    events: list[TICEvent]
+    resolution_hz: int
+    base_ts: int
+    pair_count: int
+    edges_a: int
+    edges_b: int
+    miss_a: int
+    miss_b: int
     overflow: bool
+    delay_mean_ns: float
+    delay_min_ns: float
+    delay_max_ns: float
+    delay_stddev_ns: float
+    cpu0_pct: int
+    cpu1_pct: int
+    period_a_mean_ns: int
+    period_a_min_ns: int
+    period_a_max_ns: int
+    period_b_mean_ns: int
+    period_b_min_ns: int
+    period_b_max_ns: int
+    pairs: list[TICMatchedPair] = field(default_factory=list)
 
     @property
-    def edges_a(self) -> list[TICEvent]:
-        return [e for e in self.events if e.is_edge and e.channel == TIC_CHANNEL_A]
+    def period_a_hz(self) -> float:
+        """Channel A frequency in Hz."""
+        if self.period_a_mean_ns > 0:
+            return 1e9 / self.period_a_mean_ns
+        return 0.0
 
     @property
-    def edges_b(self) -> list[TICEvent]:
-        return [e for e in self.events if e.is_edge and e.channel == TIC_CHANNEL_B]
-
-    @property
-    def overflow_count(self) -> int:
-        return sum(1 for e in self.events if e.is_overflow)
+    def period_b_hz(self) -> float:
+        """Channel B frequency in Hz."""
+        if self.period_b_mean_ns > 0:
+            return 1e9 / self.period_b_mean_ns
+        return 0.0
 
 
 @dataclass
@@ -139,7 +157,7 @@ class TICReader:
 
     Provides validation for:
     - Sequence numbers must be continuous and monotonous (no gaps)
-    - Edge counts in frame must match stats when available
+    - CRC32 integrity check
     """
 
     def __init__(
@@ -156,7 +174,7 @@ class TICReader:
             port: Serial port path (e.g., /dev/tty.usbmodem3113101)
             baudrate: Baud rate (not used for USB CDC, but set anyway)
             timeout: Read timeout in seconds
-            validate: Enable validation (sequence continuity, edge counts)
+            validate: Enable validation (sequence continuity)
         """
         self.port = port
         self.baudrate = baudrate
@@ -311,13 +329,12 @@ class TICReader:
         vs.expected_seq = seq + 1
         return errors
 
-    def read_frame(self) -> Optional[tuple[TICFrame, Optional[dict], list[str]]]:
+    def read_frame(self) -> Optional[tuple[TICFrame, list[str]]]:
         """
         Read a single frame from the serial port.
 
         Returns:
-            Tuple of (TICFrame, stats_dict, validation_errors) or None if no frame available.
-            stats_dict may be None if no stats line followed the frame.
+            Tuple of (TICFrame, validation_errors) or None if no frame available.
             validation_errors is a list of error strings (empty if all valid).
         """
         if self._serial is None:
@@ -329,34 +346,41 @@ class TICReader:
         except TimeoutError:
             return None
 
-        magic, version, resolution_hz, seq, first_edge_ts, event_count, flags = \
+        (magic, seq, resolution_hz, base_ts,
+         pair_count, edges_a, edges_b, miss_a, miss_b, flags,
+         delay_mean_ns, delay_min_ns, delay_max_ns, delay_stddev_ns,
+         cpu0_pct, cpu1_pct,
+         period_a_mean_ns, period_a_min_ns, period_a_max_ns,
+         period_b_mean_ns, period_b_min_ns, period_b_max_ns) = \
             struct.unpack(HEADER_FORMAT, header_data)
 
-        logger.debug(f"Frame header: seq={seq} events={event_count}")
+        logger.debug(f"Frame header: seq={seq} pairs={pair_count}")
 
         # Validate header fields
-        valid = (magic == TIC_FRAME_MAGIC and version == 1 and
-                 resolution_hz == 80000000 and event_count <= 10000)
+        valid = (magic == TIC_FRAME_MAGIC and
+                 resolution_hz == 80000000 and pair_count <= 10000)
         if not valid:
             if magic != TIC_FRAME_MAGIC:
                 logger.warning(f"Invalid magic: 0x{magic:08x}, resyncing...")
             else:
-                logger.warning(f"Invalid header (ver={version}, res={resolution_hz}, events={event_count}), resyncing...")
+                logger.warning(f"Invalid header (res={resolution_hz}, pairs={pair_count}), resyncing...")
             if not self._sync_to_magic():
                 return None
             # Try again after resync
             return self.read_frame()
 
-        # Read all events as raw bytes for CRC calculation
-        events_data = self._read_bytes(event_count * EVENT_SIZE)
+        # Read all pairs as raw bytes for CRC calculation
+        pairs_data = self._read_bytes(pair_count * PAIR_SIZE) if pair_count > 0 else b''
 
         # Read CRC32
         crc_data = self._read_bytes(CRC_SIZE)
         received_crc = struct.unpack('<I', crc_data)[0]
 
-        # Calculate expected CRC over header + events
+        # Calculate expected CRC over header + pairs
         expected_crc = zlib.crc32(header_data)
-        expected_crc = zlib.crc32(events_data, expected_crc) & 0xffffffff
+        if pairs_data:
+            expected_crc = zlib.crc32(pairs_data, expected_crc)
+        expected_crc &= 0xffffffff
 
         if received_crc != expected_crc:
             logger.warning(f"CRC mismatch: got 0x{received_crc:08x}, expected 0x{expected_crc:08x}, resyncing...")
@@ -365,24 +389,37 @@ class TICReader:
                 return None
             return self.read_frame()
 
-        # Parse events from raw data
-        events = []
-        for i in range(event_count):
-            offset = i * EVENT_SIZE
-            type_, channel, _, value = struct.unpack(EVENT_FORMAT, events_data[offset:offset+EVENT_SIZE])
-            events.append(TICEvent(type=type_, channel=channel, value=value))
+        # Parse pairs from raw data
+        pairs = []
+        for i in range(pair_count):
+            offset = i * PAIR_SIZE
+            ts_a, ts_b = struct.unpack(PAIR_FORMAT, pairs_data[offset:offset+PAIR_SIZE])
+            pairs.append(TICMatchedPair(ts_a=ts_a, ts_b=ts_b))
 
         frame = TICFrame(
-            version=version,
-            resolution_hz=resolution_hz,
             seq=seq,
-            first_edge_ts=first_edge_ts,
-            events=events,
+            resolution_hz=resolution_hz,
+            base_ts=base_ts,
+            pair_count=pair_count,
+            edges_a=edges_a,
+            edges_b=edges_b,
+            miss_a=miss_a,
+            miss_b=miss_b,
             overflow=(flags & TIC_FRAME_FLAG_OVERFLOW) != 0,
+            delay_mean_ns=delay_mean_ns,
+            delay_min_ns=delay_min_ns,
+            delay_max_ns=delay_max_ns,
+            delay_stddev_ns=delay_stddev_ns,
+            cpu0_pct=cpu0_pct,
+            cpu1_pct=cpu1_pct,
+            period_a_mean_ns=period_a_mean_ns,
+            period_a_min_ns=period_a_min_ns,
+            period_a_max_ns=period_a_max_ns,
+            period_b_mean_ns=period_b_mean_ns,
+            period_b_min_ns=period_b_min_ns,
+            period_b_max_ns=period_b_max_ns,
+            pairs=pairs,
         )
-
-        # No more JSON stats in binary mode - CRC follows events directly
-        stats = None
 
         # Validate if enabled
         validation_errors = []
@@ -393,10 +430,10 @@ class TICReader:
         if not validation_errors:
             self.validation_stats.frames_valid += 1
 
-        return frame, stats, validation_errors
+        return frame, validation_errors
 
 
-    def read_frames(self, auto_reconnect: bool = True) -> Iterator[tuple[TICFrame, Optional[dict], list[str]]]:
+    def read_frames(self, auto_reconnect: bool = True) -> Iterator[tuple[TICFrame, list[str]]]:
         """
         Generator that yields frames continuously.
 
@@ -404,7 +441,7 @@ class TICReader:
             auto_reconnect: If True, automatically reconnect on device disconnect
 
         Yields:
-            Tuple of (TICFrame, stats_dict, validation_errors) for each frame received.
+            Tuple of (TICFrame, validation_errors) for each frame received.
         """
         while True:
             try:
@@ -421,12 +458,13 @@ class TICReader:
 
 
 def print_header():
-    """Print table header like ESP32 console output."""
-    print("=" * 140)
-    print("  seq |  n_A | Hz_A  | min_A  | avg_A  | max_A  | std_A  |"
-          "  n_B | Hz_B  | min_B  | avg_B  | max_B  | std_B  |"
-          " d_n  |   d_min   |   d_avg   |   d_max   |   d_std   | CPU0| CPU1")
-    print("-" * 140)
+    """Print table header matching ESP32 console output."""
+    print("A_N  |   A_Hz|A_min_us|A_avg_us|A_max_us|A_std_us|"
+          "B_N  |   B_Hz|B_min_us|B_avg_us|B_max_us|B_std_us|"
+          "D_N  |   D_min_ns|   D_avg_ns|   D_max_ns|   D_std_ns|D_missA|D_missB|CPU0|CPU1")
+    print("-----|-------|--------|--------|--------|--------|"
+          "-----|-------|--------|--------|--------|--------|"
+          "-----|-----------|-----------|-----------|-----------|-------|-------|----|----|")
 
 
 def test_reader(port: str, duration: Optional[float] = None, verbose: bool = False):
@@ -438,6 +476,7 @@ def test_reader(port: str, duration: Optional[float] = None, verbose: bool = Fal
     frame_count = 0
     total_edges_a = 0
     total_edges_b = 0
+    total_pairs = 0
     total_errors = 0
 
     with TICReader(port, validate=True, timeout=5.0) as reader:
@@ -455,12 +494,11 @@ def test_reader(port: str, duration: Optional[float] = None, verbose: bool = Fal
                         print(f"  (no frame, elapsed={elapsed:.1f}s, in_waiting={reader._serial.in_waiting})")
                     continue
 
-                frame, stats, errors = result
+                frame, errors = result
                 frame_count += 1
-                edges_a = len(frame.edges_a)
-                edges_b = len(frame.edges_b)
-                total_edges_a += edges_a
-                total_edges_b += edges_b
+                total_edges_a += frame.edges_a
+                total_edges_b += frame.edges_b
+                total_pairs += frame.pair_count
 
                 # Print header periodically
                 if frame_count == 1 or frame_count % 24 == 0:
@@ -475,36 +513,26 @@ def test_reader(port: str, duration: Optional[float] = None, verbose: bool = Fal
                 if frame.overflow:
                     print(f"*** OVERFLOW in frame {frame.seq}")
 
-                # Print stats in table format (like ESP32 console)
-                if stats:
-                    ch_a = stats.get('a', {})
-                    ch_b = stats.get('b', {})
-                    delay = stats.get('d', {})
-                    cpu = stats.get('cpu', {})
+                # Print stats from frame header matching ESP32 format exactly
+                # Convert period from ns to us for display
+                a_min_us = frame.period_a_min_ns / 1000.0
+                a_avg_us = frame.period_a_mean_ns / 1000.0
+                a_max_us = frame.period_a_max_ns / 1000.0
+                a_std_us = 0.0  # stddev not in binary header
+                b_min_us = frame.period_b_min_ns / 1000.0
+                b_avg_us = frame.period_b_mean_ns / 1000.0
+                b_max_us = frame.period_b_max_ns / 1000.0
+                b_std_us = 0.0  # stddev not in binary header
 
-                    print(f"{frame.seq:5d} |"
-                          f"{ch_a.get('n', 0):5d} |"
-                          f"{ch_a.get('hz', 0):6.1f} |"
-                          f"{ch_a.get('min_us', 0):7.2f} |"
-                          f"{ch_a.get('avg_us', 0):7.2f} |"
-                          f"{ch_a.get('max_us', 0):7.2f} |"
-                          f"{ch_a.get('std_us', 0):7.3f} |"
-                          f"{ch_b.get('n', 0):5d} |"
-                          f"{ch_b.get('hz', 0):6.1f} |"
-                          f"{ch_b.get('min_us', 0):7.2f} |"
-                          f"{ch_b.get('avg_us', 0):7.2f} |"
-                          f"{ch_b.get('max_us', 0):7.2f} |"
-                          f"{ch_b.get('std_us', 0):7.3f} |"
-                          f"{delay.get('n', 0):5d} |"
-                          f"{delay.get('min_ns', 0):10.2f} |"
-                          f"{delay.get('avg_ns', 0):10.2f} |"
-                          f"{delay.get('max_ns', 0):10.2f} |"
-                          f"{delay.get('std_ns', 0):10.2f} |"
-                          f"{cpu.get('cpu0', 0):4.0f} |"
-                          f"{cpu.get('cpu1', 0):4.0f}")
-                else:
-                    # No stats - just print frame info
-                    print(f"{frame.seq:5d} | {edges_a:5d} A + {edges_b:5d} B edges (no stats)")
+                # Format: %5lu|%7.2f|%8.3f|%8.3f|%8.3f|%8.3f| for each channel
+                # Then:   %5lu|%11.3f|%11.3f|%11.3f|%11.3f|%7lu|%7lu|%4.0f|%4.0f
+                print(f"{frame.edges_a:5d}|{frame.period_a_hz:7.2f}|"
+                      f"{a_min_us:8.3f}|{a_avg_us:8.3f}|{a_max_us:8.3f}|{a_std_us:8.3f}|"
+                      f"{frame.edges_b:5d}|{frame.period_b_hz:7.2f}|"
+                      f"{b_min_us:8.3f}|{b_avg_us:8.3f}|{b_max_us:8.3f}|{b_std_us:8.3f}|"
+                      f"{frame.pair_count:5d}|{frame.delay_min_ns:11.3f}|{frame.delay_mean_ns:11.3f}|"
+                      f"{frame.delay_max_ns:11.3f}|{frame.delay_stddev_ns:11.3f}|"
+                      f"{frame.miss_a:7d}|{frame.miss_b:7d}|{frame.cpu0_pct:4d}|{frame.cpu1_pct:4d}")
 
         except KeyboardInterrupt:
             print("\nStopped by user")
@@ -522,16 +550,11 @@ def test_reader(port: str, duration: Optional[float] = None, verbose: bool = Fal
 
     print("\n" + "=" * 140)
     print("Summary:")
-    print(f"  Duration:       {elapsed:.1f}s")
-    print(f"  Frames:         {vs.frames_received}")
-    print(f"  Valid frames:   {vs.frames_valid}")
-    print(f"  Seq errors:     {vs.seq_errors}")
-    print(f"  CRC errors:     {vs.crc_errors}")
-    print(f"  Total edges A:  {total_edges_a}")
-    print(f"  Total edges B:  {total_edges_b}")
+    print(f"  Duration: {elapsed:.1f}s, Frames: {vs.frames_received} (valid: {vs.frames_valid})")
+    print(f"  Errors: seq={vs.seq_errors}, crc={vs.crc_errors}")
+    print(f"  Edges: A={total_edges_a}, B={total_edges_b}, Pairs={total_pairs}")
     if elapsed > 0:
-        print(f"  Rate A:         {total_edges_a/elapsed:.1f} edges/s")
-        print(f"  Rate B:         {total_edges_b/elapsed:.1f} edges/s")
+        print(f"  Rates: A={total_edges_a/elapsed:.1f}/s, B={total_edges_b/elapsed:.1f}/s, pairs={total_pairs/elapsed:.1f}/s")
 
     all_errors = total_errors + vs.crc_errors
     if all_errors > 0:
