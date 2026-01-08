@@ -18,6 +18,7 @@
 #   -m, --mode MODE     - Build mode: loopback or normal (default: normal)
 #   -b, --build-dir DIR - Custom build directory (default: build/<mode>)
 #   --csv               - Enable CSV output format
+#   --binary            - Enable binary USB CDC output
 #   --no-reset          - Don't reset on monitor
 #
 # Targets:
@@ -64,6 +65,7 @@ DO_FLASH=false
 DO_MONITOR=false
 NO_RESET=false
 CSV_OUTPUT=false
+BINARY_OUTPUT=false
 MODE="normal"
 FREQ_HZ=2000
 FREQ_B_HZ=""
@@ -112,6 +114,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --csv)
             CSV_OUTPUT=true
+            shift
+            ;;
+        --binary)
+            BINARY_OUTPUT=true
             shift
             ;;
         -b|--build-dir)
@@ -203,6 +209,20 @@ EOF
     if [[ "$CSV_OUTPUT" == true ]]; then
         echo "CONFIG_TIC_OUTPUT_CSV=y"
     fi
+
+    # Binary USB CDC output (optional)
+    if [[ "$BINARY_OUTPUT" == true ]]; then
+        echo "CONFIG_TIC_OUTPUT_BINARY=y"
+        echo "# TinyUSB task configuration"
+        echo "CONFIG_TINYUSB_TASK_STACK_SIZE=4096"
+        echo "# TinyUSB CDC configuration"
+        echo "CONFIG_TINYUSB_CDC_ENABLED=y"
+        echo "CONFIG_TINYUSB_CDC_COUNT=1"
+        echo "CONFIG_TINYUSB_CDC_RX_BUFSIZE=512"
+        echo "CONFIG_TINYUSB_CDC_TX_BUFSIZE=512"
+        echo "# Disable USB Serial JTAG secondary console (conflicts with TinyUSB)"
+        echo "CONFIG_ESP_CONSOLE_SECONDARY_NONE=y"
+    fi
 }
 
 cd "$PROJECT_DIR"
@@ -220,6 +240,7 @@ SDKCONFIG_FILE="$BUILD_DIR/sdkconfig.$MODE"
 
 echo "=== TIC Build Helper ==="
 echo "Mode: $MODE"
+[[ "$BINARY_OUTPUT" == true ]] && echo "Binary USB CDC: enabled"
 echo "Build dir: $BUILD_DIR"
 if [[ -n "$FREQ_B_HZ" ]]; then
     echo "Frequency A: $FREQ_HZ Hz"

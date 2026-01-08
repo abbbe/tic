@@ -91,4 +91,12 @@ menu "TIC Configuration"
             Output statistics in CSV format instead of table format.
             Useful for automated testing and data processing.
 
+    config TIC_OUTPUT_BINARY
+        bool "Binary output mode (USB CDC)"
+        default n
+        help
+            Output raw edge data in binary format over USB CDC (OTG port).
+            Enables high-throughput streaming to host for external processing.
+            Serial console output (UART) remains active for debugging.
+
 endmenu
