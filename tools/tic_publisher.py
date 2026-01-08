@@ -1,25 +1,28 @@
+#!/usr/bin/env python3
 """
 TIC MQTT Publisher
 
 Reads TIC statistics and publishes to MQTT for ingestion into the TIG stack.
 
 Supports two modes:
-1. Binary mode: Reads binary frames + JSON stats from USB CDC (preferred)
+1. Binary mode: Reads binary frames from USB CDC via TICReader (preferred)
 2. CSV mode: Reads CSV output from UART serial (fallback)
 
 MQTT Topics:
     tic/stats       - Per-buffer statistics (delay, jitter, edge counts)
-    tic/edges       - Raw edge pairs (optional, high volume)
 
 Usage:
-    # Binary mode (USB CDC)
-    python tic_publisher.py --port /dev/tty.usbmodem3114401 --mode binary
+    # Binary mode (USB CDC) - default
+    python tic_publisher.py --port /dev/tty.usbmodem3114401
 
     # CSV mode (UART serial)
-    python tic_publisher.py --port /dev/tty.usbmodem5AF71074821 --mode csv
+    python tic_publisher.py --port /dev/tty.usbserial-xxx --mode csv
 
     # With MQTT broker
-    python tic_publisher.py --port /dev/tty.usbmodem3114401 --mqtt-host localhost
+    python tic_publisher.py --port /dev/tty.usbmodem3114401 --mqtt-host 192.168.1.100
+
+    # Dry run (no MQTT, just print stats)
+    python tic_publisher.py --port /dev/tty.usbmodem3114401 --dry-run
 """
 
 import argparse
@@ -32,6 +35,8 @@ from dataclasses import dataclass
 
 import serial
 import paho.mqtt.client as mqtt
+
+from tic_binary_reader import TICReader, TICFrame
 
 logger = logging.getLogger(__name__)
 
@@ -157,53 +162,44 @@ def parse_csv_line(line: str, seq_counter: int) -> Optional[TICStats]:
         return None
 
 
-def parse_json_stats(line: str, seq_counter: int) -> Optional[TICStats]:
-    """
-    Parse JSON stats line from TIC USB CDC output.
+def frame_to_stats(frame: TICFrame) -> TICStats:
+    """Convert TICFrame (from binary reader) to TICStats."""
+    return TICStats(
+        seq=frame.seq,
+        a_n=frame.edges_a,
+        a_hz=frame.period_a_hz,
+        a_min_us=frame.period_a_min_ns / 1000.0,
+        a_avg_us=frame.period_a_mean_ns / 1000.0,
+        a_max_us=frame.period_a_max_ns / 1000.0,
+        a_std_us=0.0,  # Not in binary header
+        b_n=frame.edges_b,
+        b_hz=frame.period_b_hz,
+        b_min_us=frame.period_b_min_ns / 1000.0,
+        b_avg_us=frame.period_b_mean_ns / 1000.0,
+        b_max_us=frame.period_b_max_ns / 1000.0,
+        b_std_us=0.0,  # Not in binary header
+        d_n=frame.pair_count,
+        d_min_ns=frame.delay_min_ns,
+        d_avg_ns=frame.delay_mean_ns,
+        d_max_ns=frame.delay_max_ns,
+        d_std_ns=frame.delay_stddev_ns,
+        d_miss_a=frame.miss_a,
+        d_miss_b=frame.miss_b,
+        cpu0=float(frame.cpu0_pct),
+        cpu1=float(frame.cpu1_pct),
+    )
 
-    Format: {"type":"stats","a":{...},"b":{...},"d":{...},"cpu":{...}}
-    """
-    line = line.strip()
-    if not line.startswith('{'):
-        return None
 
-    try:
-        data = json.loads(line)
-        if data.get('type') != 'stats':
-            return None
-
-        ch_a = data.get('a', {})
-        ch_b = data.get('b', {})
-        delay = data.get('d', {})
-        cpu = data.get('cpu', {})
-
-        return TICStats(
-            seq=seq_counter,
-            a_n=ch_a.get('n', 0),
-            a_hz=ch_a.get('hz', 0.0),
-            a_min_us=ch_a.get('min_us', 0.0),
-            a_avg_us=ch_a.get('avg_us', 0.0),
-            a_max_us=ch_a.get('max_us', 0.0),
-            a_std_us=ch_a.get('std_us', 0.0),
-            b_n=ch_b.get('n', 0),
-            b_hz=ch_b.get('hz', 0.0),
-            b_min_us=ch_b.get('min_us', 0.0),
-            b_avg_us=ch_b.get('avg_us', 0.0),
-            b_max_us=ch_b.get('max_us', 0.0),
-            b_std_us=ch_b.get('std_us', 0.0),
-            d_n=delay.get('n', 0),
-            d_min_ns=delay.get('min_ns', 0.0),
-            d_avg_ns=delay.get('avg_ns', 0.0),
-            d_max_ns=delay.get('max_ns', 0.0),
-            d_std_ns=delay.get('std_ns', 0.0),
-            d_miss_a=delay.get('miss_a', 0),
-            d_miss_b=delay.get('miss_b', 0),
-            cpu0=cpu.get('cpu0'),
-            cpu1=cpu.get('cpu1'),
-        )
-    except (json.JSONDecodeError, KeyError) as e:
-        logger.debug(f"Failed to parse JSON: {e}")
-        return None
+def read_binary_stats(port: str) -> Iterator[TICStats]:
+    """Read binary frames from USB CDC port using TICReader."""
+    with TICReader(port, validate=True) as reader:
+        logger.info(f"Reading binary frames from {port}")
+        for frame, errors in reader.read_frames():
+            for err in errors:
+                logger.warning(err)
+            if frame.overflow:
+                logger.warning(f"OVERFLOW in frame {frame.seq}")
+            yield frame_to_stats(frame)
 
 
 def read_csv_stats(port: str, baudrate: int = 115200) -> Iterator[TICStats]:
@@ -225,37 +221,6 @@ def read_csv_stats(port: str, baudrate: int = 115200) -> Iterator[TICStats]:
                 time.sleep(1)
 
 
-def read_json_stats(port: str, baudrate: int = 115200) -> Iterator[TICStats]:
-    """Read JSON stats from USB CDC port (mixed with binary frames)."""
-    seq_counter = 0
-
-    with serial.Serial(port, baudrate, timeout=1) as ser:
-        logger.info(f"Reading JSON stats from {port}")
-        ser.dtr = True  # Enable DTR for USB CDC
-
-        buffer = b''
-        while True:
-            try:
-                chunk = ser.read(1024)
-                if chunk:
-                    buffer += chunk
-
-                    # Look for complete JSON lines
-                    while b'\n' in buffer:
-                        line, buffer = buffer.split(b'\n', 1)
-                        try:
-                            line_str = line.decode('utf-8')
-                            stats = parse_json_stats(line_str, seq_counter)
-                            if stats:
-                                seq_counter += 1
-                                yield stats
-                        except UnicodeDecodeError:
-                            pass  # Skip binary data
-            except Exception as e:
-                logger.error(f"Error reading serial: {e}")
-                time.sleep(1)
-
-
 class TICPublisher:
     """Publishes TIC stats to MQTT broker."""
 
@@ -265,6 +230,8 @@ class TICPublisher:
         mqtt_port: int = 1883,
         topic: str = "tic/stats",
         client_id: Optional[str] = None,
+        username: Optional[str] = None,
+        password: Optional[str] = None,
     ):
         self.topic = topic
         self.connected = False
@@ -277,6 +244,10 @@ class TICPublisher:
         )
         self.mqtt.on_connect = self._on_connect
         self.mqtt.on_disconnect = self._on_disconnect
+
+        # Set credentials if provided
+        if username:
+            self.mqtt.username_pw_set(username, password)
 
         # Connect
         logger.info(f"Connecting to MQTT broker at {mqtt_host}:{mqtt_port}")
@@ -331,6 +302,8 @@ def run_publisher(
     mode: str,
     mqtt_host: str,
     mqtt_port: int,
+    mqtt_user: Optional[str] = None,
+    mqtt_pass: Optional[str] = None,
     duration: Optional[float] = None,
     dry_run: bool = False,
 ):
@@ -340,12 +313,12 @@ def run_publisher(
     if mode == "csv":
         reader = read_csv_stats(port)
     else:
-        reader = read_json_stats(port)
+        reader = read_binary_stats(port)
 
     # Create publisher (or None for dry run)
     publisher = None
     if not dry_run:
-        publisher = TICPublisher(mqtt_host, mqtt_port)
+        publisher = TICPublisher(mqtt_host, mqtt_port, username=mqtt_user, password=mqtt_pass)
 
     start_time = time.time()
     stats_count = 0
@@ -381,6 +354,8 @@ def run_publisher(
 
 
 def main():
+    import os
+
     parser = argparse.ArgumentParser(description="TIC MQTT Publisher")
     parser.add_argument(
         "--port", "-p",
@@ -389,9 +364,9 @@ def main():
     )
     parser.add_argument(
         "--mode", "-m",
-        choices=["csv", "json", "binary"],
-        default="csv",
-        help="Input mode: csv (UART), json (USB CDC JSON only), binary (USB CDC with frames)"
+        choices=["binary", "csv"],
+        default="binary",
+        help="Input mode: binary (USB CDC, default), csv (UART serial)"
     )
     parser.add_argument(
         "--mqtt-host",
@@ -403,6 +378,16 @@ def main():
         type=int,
         default=1883,
         help="MQTT broker port (default: 1883)"
+    )
+    parser.add_argument(
+        "--mqtt-user",
+        default=os.environ.get("MQTT_USERNAME"),
+        help="MQTT username (default: $MQTT_USERNAME)"
+    )
+    parser.add_argument(
+        "--mqtt-pass",
+        default=os.environ.get("MQTT_PASSWORD"),
+        help="MQTT password (default: $MQTT_PASSWORD)"
     )
     parser.add_argument(
         "--duration", "-d",
@@ -433,6 +418,8 @@ def main():
         mode=args.mode,
         mqtt_host=args.mqtt_host,
         mqtt_port=args.mqtt_port,
+        mqtt_user=args.mqtt_user,
+        mqtt_pass=args.mqtt_pass,
         duration=args.duration,
         dry_run=args.dry_run,
     )
