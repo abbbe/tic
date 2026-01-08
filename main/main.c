@@ -54,6 +54,13 @@ void app_main(void)
 
     ESP_LOGI(TAG, "Capture: A=GPIO%d B=GPIO%d", CONFIG_TIC_INPUT_GPIO_A, CONFIG_TIC_INPUT_GPIO_B);
 
+    // Initialize capture module first (sets MCPWM group clock)
+    ret = tic_capture_init(CONFIG_TIC_INPUT_GPIO_A, CONFIG_TIC_INPUT_GPIO_B);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to initialize capture module");
+        return;
+    }
+
     // Initialize signal generator A
     if (CONFIG_TIC_SIGGEN_A_FREQ_HZ > 0) {
         ESP_LOGI(TAG, "SigGen A: GPIO%d freq=%dHz loopback=%d",
@@ -85,13 +92,6 @@ void app_main(void)
     }
 
     ESP_LOGI(TAG, "Buffer: %d edges or %d ms", CONFIG_TIC_BUFFER_SIZE, CONFIG_TIC_STATS_PERIOD_MS);
-
-    // Initialize capture module
-    ret = tic_capture_init(CONFIG_TIC_INPUT_GPIO_A, CONFIG_TIC_INPUT_GPIO_B);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to initialize capture module");
-        return;
-    }
 
     EventGroupHandle_t event_group = tic_capture_get_event_group();
     if (!event_group) {

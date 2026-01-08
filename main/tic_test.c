@@ -8,7 +8,7 @@
 
 static const char *TAG = "tic_siggen";
 
-#define TIMER_RESOLUTION_HZ 80000000  // 80 MHz = 12.5ns per tick
+#define TIMER_RESOLUTION_HZ 80000000  // 80 MHz for signal generator (16-bit period limit)
 
 // Generator A handles
 static mcpwm_timer_handle_t s_timer_a = NULL;

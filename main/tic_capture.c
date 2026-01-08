@@ -116,7 +116,12 @@ esp_err_t tic_capture_init(int gpio_a, int gpio_b)
     // Create capture timer with maximum resolution
     mcpwm_capture_timer_config_t cap_timer_config = {
         .group_id = 0,
+#if CONFIG_IDF_TARGET_ESP32C6
+        .clk_src = MCPWM_CAPTURE_CLK_SRC_PLL160M,
+        .resolution_hz = 160000000,  // Request full 160 MHz on C6
+#else
         .clk_src = MCPWM_CAPTURE_CLK_SRC_DEFAULT,
+#endif
     };
     ret = mcpwm_new_capture_timer(&cap_timer_config, &s_cap_timer);
     if (ret != ESP_OK) {
