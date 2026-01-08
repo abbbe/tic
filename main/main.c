@@ -11,6 +11,9 @@
 #include "tic_stats.h"
 #include "tic_matcher.h"
 #include "tic_test.h"
+#if CONFIG_TIC_OUTPUT_BINARY
+#include "tic_serial.h"
+#endif
 
 static const char *TAG = "tic_main";
 
@@ -35,6 +38,12 @@ void app_main(void)
     esp_err_t ret;
 
     ESP_LOGI(TAG, "=== Time Interval Counter (TIC) ===");
+
+#if CONFIG_TIC_OUTPUT_BINARY
+    // Initialize USB CDC for binary output
+    tic_serial_init();
+    ESP_LOGI(TAG, "Binary output mode enabled");
+#endif
 
     // Initialize CPU idle time measurement
     tic_cpu_init();
@@ -179,7 +188,13 @@ void app_main(void)
                 tic_matcher_timeout(&s_matcher, last_timestamp, max_delay_ns);
             }
 
-            // Process period statistics
+#if CONFIG_TIC_OUTPUT_BINARY
+            // Binary output mode: send raw events via USB CDC
+            // Stats will be computed by the Python reader on the host
+            tic_serial_send_frame(events, event_count, resolution, overrun);
+#endif
+
+            // Stats processing (for CSV output and matcher cleanup)
             tic_stats_t stats;
             tic_stats_process(events, event_count, resolution, &stats);
 
@@ -190,6 +205,9 @@ void app_main(void)
             tic_cpu_stats_t cpu_stats;
             tic_cpu_get_stats(&cpu_stats, true);
 
+            // Note: In binary mode, stats are NOT sent via CDC to avoid
+            // corrupting the binary stream. Host computes stats from raw edges.
+            // Print stats (CSV output to console)
             tic_stats_print(&stats, &cpu_stats);
         }
     }
