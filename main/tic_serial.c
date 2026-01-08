@@ -16,7 +16,7 @@ static uint32_t s_seq = 0;
 
 // USB string descriptors (persistent storage)
 static char s_serial_str[18];  // "TIC_" + 12 hex chars + null
-static const char *s_string_desc[4];
+static const char *s_string_desc[5];
 
 void tic_serial_init(void)
 {
@@ -28,11 +28,13 @@ void tic_serial_init(void)
     snprintf(s_serial_str, sizeof(s_serial_str), "TIC_%02X%02X%02X%02X%02X%02X",
              mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
 
-    // USB string descriptors: [0]=language, [1]=manufacturer, [2]=product, [3]=serial
-    s_string_desc[0] = "";                    // Language (handled by TinyUSB)
+    // USB string descriptors: [0]=language, [1]=manufacturer, [2]=product, [3]=serial, [4]=CDC interface
+    static const char langid[] = {0x09, 0x04};  // Language: English (0x0409)
+    s_string_desc[0] = langid;
     s_string_desc[1] = "Espressif";           // Manufacturer
     s_string_desc[2] = "TIC Binary";          // Product
     s_string_desc[3] = s_serial_str;          // Serial number (MAC-based)
+    s_string_desc[4] = "TIC CDC";             // CDC Interface string
 
     ESP_LOGI(TAG, "USB Serial: %s", s_serial_str);
 
@@ -46,7 +48,7 @@ void tic_serial_init(void)
         },
         .descriptor = {
             .string = s_string_desc,
-            .string_count = 4,
+            .string_count = 5,
         },
     };
 
