@@ -1,6 +1,7 @@
 #include "tic_serial.h"
 #include "esp_log.h"
 #include "esp_crc.h"
+#include "esp_mac.h"
 #include "tinyusb.h"
 #include "tusb_cdc_acm.h"
 #include "class/cdc/cdc_device.h"  // for tud_cdc_connected()
@@ -13,17 +14,39 @@ static const char *TAG = "tic_serial";
 // Frame sequence number
 static uint32_t s_seq = 0;
 
+// USB string descriptors (persistent storage)
+static char s_serial_str[18];  // "TIC_" + 12 hex chars + null
+static const char *s_string_desc[4];
+
 void tic_serial_init(void)
 {
     ESP_LOGI(TAG, "Initializing USB CDC for binary output");
 
-    // TinyUSB driver configuration
+    // Build serial number from MAC address for persistent port naming
+    uint8_t mac[6];
+    esp_read_mac(mac, ESP_MAC_BASE);
+    snprintf(s_serial_str, sizeof(s_serial_str), "TIC_%02X%02X%02X%02X%02X%02X",
+             mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+
+    // USB string descriptors: [0]=language, [1]=manufacturer, [2]=product, [3]=serial
+    s_string_desc[0] = "";                    // Language (handled by TinyUSB)
+    s_string_desc[1] = "Espressif";           // Manufacturer
+    s_string_desc[2] = "TIC Binary";          // Product
+    s_string_desc[3] = s_serial_str;          // Serial number (MAC-based)
+
+    ESP_LOGI(TAG, "USB Serial: %s", s_serial_str);
+
+    // TinyUSB driver configuration with custom descriptors
     const tinyusb_config_t tusb_cfg = {
         .port = TINYUSB_PORT_FULL_SPEED_0,
         .task = {
             .size = 4096,
             .priority = 5,
             .xCoreID = 0,
+        },
+        .descriptor = {
+            .string = s_string_desc,
+            .string_count = 4,
         },
     };
 
