@@ -153,12 +153,12 @@ menu "TIC Configuration"
         config TIC_WIFI_RING_SIZE
             int "Frame ring buffer size"
             depends on TIC_WIFI_ENABLED
-            default 20
-            range 5 50
+            default 10
+            range 3 20
             help
                 Number of frames to buffer when WiFi/MQTT is temporarily unavailable.
-                Each frame is ~8KB, so 20 frames = ~160KB.
-                Provides ~10 seconds of buffering at 2Hz frame rate.
+                Each frame is ~17KB (2kHz for 1s), so 10 frames = ~170KB.
+                Provides ~5-10 seconds of buffering.
     endmenu
 
 endmenu

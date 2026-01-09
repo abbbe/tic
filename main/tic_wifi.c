@@ -27,7 +27,9 @@ static char s_topic[64];
 
 // Ring buffer for frames during WiFi/MQTT outage
 #define RING_SIZE CONFIG_TIC_WIFI_RING_SIZE
-#define MAX_FRAME_SIZE (sizeof(tic_frame_header_t) + (CONFIG_TIC_BUFFER_SIZE / 2) * sizeof(tic_matched_pair_t) + 4)
+// Max ~2100 pairs per frame (2kHz * 1s + headroom) = 16800 bytes pairs + 74 header + 4 CRC ≈ 17KB
+#define MAX_PAIRS_PER_FRAME 2100
+#define MAX_FRAME_SIZE (sizeof(tic_frame_header_t) + MAX_PAIRS_PER_FRAME * sizeof(tic_matched_pair_t) + 4)
 
 typedef struct {
     uint8_t *data;
@@ -69,11 +71,7 @@ esp_err_t tic_wifi_init(void)
     }
 
     for (int i = 0; i < RING_SIZE; i++) {
-        s_ring[i].data = heap_caps_malloc(MAX_FRAME_SIZE, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-        if (!s_ring[i].data) {
-            // Fall back to internal RAM
-            s_ring[i].data = malloc(MAX_FRAME_SIZE);
-        }
+        s_ring[i].data = malloc(MAX_FRAME_SIZE);
         if (!s_ring[i].data) {
             ESP_LOGE(TAG, "Failed to allocate ring buffer slot %d", i);
             return ESP_ERR_NO_MEM;
@@ -81,7 +79,8 @@ esp_err_t tic_wifi_init(void)
         s_ring[i].len = 0;
         s_ring[i].valid = false;
     }
-    ESP_LOGI(TAG, "Ring buffer: %d slots, %d bytes each", RING_SIZE, MAX_FRAME_SIZE);
+    ESP_LOGI(TAG, "Ring buffer: %d slots, %zu bytes each (~%dKB total)",
+             RING_SIZE, MAX_FRAME_SIZE, (RING_SIZE * MAX_FRAME_SIZE) / 1024);
 
     // Initialize NVS (required for WiFi)
     esp_err_t ret = nvs_flash_init();
@@ -117,6 +116,9 @@ esp_err_t tic_wifi_init(void)
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
     ESP_ERROR_CHECK(esp_wifi_start());
+
+    // Disable WiFi power save for stable streaming
+    ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
 
     ESP_LOGI(TAG, "WiFi initialized, connecting...");
     return ESP_OK;
@@ -154,8 +156,13 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base,
             esp_mqtt_client_config_t mqtt_cfg = {
                 .broker.address.uri = uri,
                 .network.reconnect_timeout_ms = 1000,
+                .network.timeout_ms = 30000,  // 30s network timeout
             };
             s_mqtt_client = esp_mqtt_client_init(&mqtt_cfg);
+            if (!s_mqtt_client) {
+                ESP_LOGE(TAG, "Failed to init MQTT client (out of memory?)");
+                return;
+            }
             esp_mqtt_client_register_event(s_mqtt_client, ESP_EVENT_ANY_ID,
                                            mqtt_event_handler, NULL);
             esp_mqtt_client_start(s_mqtt_client);
@@ -231,10 +238,10 @@ static void flush_ring_buffer(void)
 
     int flushed = 0;
     while (s_ring[s_ring_tail].valid) {
-        // Publish buffered frame
+        // Publish buffered frame with QoS 0 (fire-and-forget)
         int ret = esp_mqtt_client_publish(s_mqtt_client, s_topic,
                                           (const char *)s_ring[s_ring_tail].data,
-                                          s_ring[s_ring_tail].len, 1, 0);
+                                          s_ring[s_ring_tail].len, 0, 0);
         if (ret < 0) {
             ESP_LOGW(TAG, "Failed to flush buffered frame");
             break;
@@ -307,9 +314,9 @@ void tic_wifi_send_frame(const tic_matched_pair_t *pairs, uint16_t pair_count,
         // First flush any buffered frames
         flush_ring_buffer();
 
-        // Send current frame
+        // Send current frame with QoS 0 (fire-and-forget, ring buffer handles reliability)
         int ret = esp_mqtt_client_publish(s_mqtt_client, s_topic,
-                                          (const char *)frame_buf, frame_len, 1, 0);
+                                          (const char *)frame_buf, frame_len, 0, 0);
         if (ret >= 0) {
             return;  // Success
         }
