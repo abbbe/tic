@@ -68,7 +68,7 @@ menu "TIC Configuration"
 
     config TIC_BUFFER_SIZE
         int "Buffer size (events)"
-        default 16384
+        default 4096
         range 256 32768
         help
             Number of events each buffer can hold.
