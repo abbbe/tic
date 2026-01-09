@@ -1,7 +1,7 @@
-# TIC - Time Interval Counter for ESP32-S3
+# TIC - Time Interval Counter for ESP32
 
-Dual-channel time interval counter and generator based on ESP32 S3 MCPWM.
-Measures signal period and inter-channel delay with 12.5ns resolution.
+Dual-channel time interval counter and generator based on ESP32 S3/C6 MCPWM.
+Measures signal period and inter-channel delay with 12.5/6.25ns resolution.
 
 ## Features
 
@@ -13,7 +13,7 @@ Measures signal period and inter-channel delay with 12.5ns resolution.
 
 ## Hardware
 
-- ESP32-S3 (uses MCPWM peripheral)
+- ESP32 S3 or C6 (uses MCPWM peripheral)
 - Input signals: 3.3V logic level, rising edge triggered
 
 Default GPIOs (configurable via menuconfig):
@@ -130,12 +130,6 @@ Single row per buffer, header repeats every 24 rows:
 | `A_`, `B_` | N, Hz, min_us, avg_us, max_us, std_us |
 | `D_` | N, min_ns, avg_ns, max_ns, std_ns, missA, missB |
 
-## TODO
-
-- [ ] Compact event struct (currently 8 bytes/event, could be 5 with packed channel+type)
-- [ ] USB CDC streaming for raw edge data
-- [ ] InfluxDB/MQTT integration
-
 ## License
 
-MIT
+GPLv3
